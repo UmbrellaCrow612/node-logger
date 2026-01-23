@@ -4,7 +4,7 @@
 npm i node-logger
 ```
 
-A lightwieght logger for node js to print to console and also save them to log files auto rotating
+A lightweight logger for node js to print to console and also save them to log files auto rotating
 
 
 # Example
