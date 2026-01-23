@@ -47,6 +47,11 @@ class NodeLogger {
   private _options: NodeLoggerOptions;
 
   /**
+   * Holds path to todays log file to append new logs to or null if they arent saving logs to files
+   */
+  private _todaysLogFilePath: string | null = null;
+
+  /**
    * Pass addtional options on initialization to change the loggers behaviour
    * @param options Change the behaviour of the logger
    */
@@ -141,6 +146,7 @@ class NodeLogger {
 
     if (this._options.saveToLogFile) {
       this.cleanupOldLogFiles();
+      this._todaysLogFilePath = this.createTodaysLogFile();
     }
   }
 
@@ -150,24 +156,104 @@ class NodeLogger {
   private cleanupOldLogFiles() {
     try {
       const files = nodeFs.readdirSync(this._options.logFilesBasePath);
-      const now = Date.now();
+      const now = new Date();
       const retentionMs =
         this._options.logFileRetentionPeriodInDays * 24 * 60 * 60 * 1000;
 
       for (const file of files) {
         if (!file.endsWith(".log")) continue;
 
-        const filePath = path.join(this._options.logFilesBasePath, file);
-        const stats = nodeFs.statSync(filePath);
+        try {
+          const dateString = file.replace(".log", "");
+          const fileDateParts = dateString.split("-");
 
-        // Check if file is older than retention period
-        if (now - stats.mtimeMs > retentionMs) {
-          nodeFs.unlinkSync(filePath);
+          if (fileDateParts.length !== 3) {
+            console.warn(`Skipping file with invalid date format: ${file}`);
+            continue;
+          }
+
+          const year = parseInt(fileDateParts[0] as any, 10);
+          const month = parseInt(fileDateParts[1] as any, 10) - 1; // JS months are 0-indexed
+          const day = parseInt(fileDateParts[2] as any, 10);
+
+          if (isNaN(year) || isNaN(month) || isNaN(day)) {
+            console.warn(`Skipping file with invalid date values: ${file}`);
+            continue;
+          }
+
+          const fileDate = new Date(year, month, day);
+
+          if (isNaN(fileDate.getTime())) {
+            console.warn(`Skipping file with invalid date: ${file}`);
+            continue;
+          }
+
+          const fileAgeMs = now.getTime() - fileDate.getTime();
+
+          if (fileAgeMs > retentionMs) {
+            const filePath = path.join(this._options.logFilesBasePath, file);
+            nodeFs.unlinkSync(filePath);
+            console.log(
+              `Deleted old log file: ${file} (age: ${Math.floor(fileAgeMs / (24 * 60 * 60 * 1000))} days)`,
+            );
+          }
+        } catch (error) {
+          console.error(
+            `Failed to process log file ${file}: ${this.extractErrorInfo(error)}`,
+          );
+          continue;
         }
       }
     } catch (error) {
       console.error(
         `Failed to cleanup old log files: ${this.extractErrorInfo(error)}`,
+      );
+
+      throw error;
+    }
+  }
+
+  /**
+   * Creates today's log file if it doesn't already exist
+   * @returns The path to today's log file
+   */
+  private createTodaysLogFile(): string {
+    try {
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, "0");
+      const day = String(today.getDate()).padStart(2, "0");
+
+      const dateString = `${year}-${month}-${day}`;
+      const fileName = `${dateString}.log`;
+      const filePath = path.join(this._options.logFilesBasePath, fileName);
+
+      if (nodeFs.existsSync(filePath)) {
+        const stats = nodeFs.statSync(filePath);
+
+        if (!stats.isFile()) {
+          throw new Error(
+            `Log file path '${filePath}' exists but is not a file`,
+          );
+        }
+
+        return filePath;
+      }
+
+      try {
+        const header = `=== Log file created on ${dateString} ===\n\n`;
+        nodeFs.writeFileSync(filePath, header, { encoding: "utf8" });
+
+        console.log(`Created new log file: ${fileName}`);
+        return filePath;
+      } catch (error) {
+        throw new Error(
+          `Failed to create log file at '${filePath}': ${this.extractErrorInfo(error)}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Failed to create today's log file: ${this.extractErrorInfo(error)}`,
       );
 
       throw error;
