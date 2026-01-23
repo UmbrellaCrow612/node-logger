@@ -1,6 +1,9 @@
 import nodeFs = require("node:fs");
 import path = require("node:path");
 
+/**
+ * Holds default options for the logger
+ */
 const defaultOptions: NodeLoggerOptions = {
   logFileRetentionPeriodInDays: 30,
   logFilesBasePath: "./logs",
@@ -60,7 +63,7 @@ class NodeLogger {
   private _options: NodeLoggerOptions;
 
   /**
-   * Holds path to todays log file to append new logs to or null if they arent saving logs to files
+   * Holds path to todays log file to append new logs to or null if they arent saving logs to files // TODO RE COMUTE EACH TIME AS 24 HOUR RUN STALE
    */
   private _todaysLogFilePath: string | null = null;
 
@@ -78,6 +81,11 @@ class NodeLogger {
    * Indicates if a write operation is currently in progress
    */
   private _isWriting: boolean = false;
+
+  /**
+   * Indicates when the last clean happened should be every 24 hours
+   */
+  private _lastCleanedOldLogs: Date | null = null;
 
   /**
    * Pass addtional options on initialization to change the loggers behaviour
@@ -128,7 +136,7 @@ class NodeLogger {
 
     try {
       if (this._options.saveToLogFile) {
-        this.initLogFileAndFolder();
+        this.cleanupOldLogFiles();
       }
     } catch (error) {
       console.error(
@@ -278,32 +286,6 @@ class NodeLogger {
   }
 
   /**
-   * Runs initialization such as making log folders on start and other needed functions
-   */
-  private initLogFileAndFolder() {
-    if (nodeFs.existsSync(this._options.logFilesBasePath)) {
-      const stats = nodeFs.statSync(this._options.logFilesBasePath);
-
-      if (stats.isFile()) {
-        throw new Error(
-          `Log files base path '${this._options.logFilesBasePath}' exists but is a file, not a directory`,
-        );
-      }
-    } else {
-      try {
-        nodeFs.mkdirSync(this._options.logFilesBasePath, { recursive: true });
-      } catch (error) {
-        throw new Error(
-          `Failed to create log directory at '${this._options.logFilesBasePath}': ${this.extractErrorInfo(error)}`,
-        );
-      }
-    }
-
-    this.cleanupOldLogFiles();
-    this._todaysLogFilePath = this.createTodaysLogFile();
-  }
-
-  /**
    * Removes log files older than the retention period
    */
   private cleanupOldLogFiles() {
@@ -329,55 +311,6 @@ class NodeLogger {
       }
     } catch (error) {
       console.error(`Cleanup failed: ${this.extractErrorInfo(error)}`);
-    }
-  }
-
-  /**
-   * Generates a UTC-based date string (YYYY-MM-DD)
-   */
-  private getUtcDateString(date: Date): string {
-    return date.toISOString().split("T")[0] as string;
-  }
-
-  /**
-   * Creates today's log file if it doesn't already exist
-   * @returns The path to today's log file
-   */
-  private createTodaysLogFile(): string {
-    try {
-      const now = new Date();
-      const fileName = `${this.getUtcDateString(now)}.log`;
-      const filePath = path.join(this._options.logFilesBasePath, fileName);
-
-      if (nodeFs.existsSync(filePath)) {
-        const stats = nodeFs.statSync(filePath);
-
-        if (!stats.isFile()) {
-          throw new Error(
-            `Log file path '${filePath}' exists but is not a file`,
-          );
-        }
-
-        return filePath;
-      }
-
-      try {
-        const header = `=== Log file created on ${this.getUtcDateString(now)} ===\n\n`;
-        nodeFs.writeFileSync(filePath, header, { encoding: "utf8" });
-
-        console.log(`Created new log file: ${fileName}`);
-        return filePath;
-      } catch (error) {
-        throw new Error(
-          `Failed to create log file at '${filePath}': ${this.extractErrorInfo(error)}`,
-        );
-      }
-    } catch (error) {
-      console.error(
-        `Failed to create today's log file: ${this.extractErrorInfo(error)}`,
-      );
-
-      throw error;
     }
   }
 
