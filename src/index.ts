@@ -114,7 +114,6 @@ class NodeLogger {
     }
 
     // TODO: add process on exit and others to save any logs to log file
-    console.log(this._todaysLogFilePath);
   }
 
   /**
@@ -141,7 +140,15 @@ class NodeLogger {
     const fullMessage = logParts.join(" ");
     console.log(fullMessage);
 
-    // TODO: Add save to log file later enque it then async add itr back flushing it like logger.js
+    if (this._options.saveToLogFile) {
+      this.enqueMessage(
+        this.formatMessageForLogFile(
+          "INFO",
+          message,
+          this._options.showLogTime ? new Date().toISOString() : null,
+        ),
+      );
+    }
   }
 
   /**
@@ -168,14 +175,22 @@ class NodeLogger {
     const fullMessage = logParts.join(" ");
     console.warn(fullMessage);
 
-    // TODO: Add save to log file later enque it then async add itr back flushing it like logger.js
+    if (this._options.saveToLogFile) {
+      this.enqueMessage(
+        this.formatMessageForLogFile(
+          "WARN",
+          message,
+          this._options.showLogTime ? new Date().toISOString() : null,
+        ),
+      );
+    }
   }
 
   /**
    * Logs an error message to the console - pass any message but it is reccomended you pass the actual error object so we can print as much information for you.
-   * 
+   *
    * For example:
-   * 
+   *
    * ```ts
    * logger.error(new Error(""));
    * ```
@@ -202,8 +217,36 @@ class NodeLogger {
     const fullMessage = logParts.join(" ");
     console.error(fullMessage);
 
-    // TODO: Add save to log file later enque it then async add itr back flushing it like logger.js
+    if (this._options.saveToLogFile) {
+      this.enqueMessage(
+        this.formatMessageForLogFile(
+          "ERROR",
+          errorInfo,
+          this._options.showLogTime ? new Date().toISOString() : null,
+        ),
+      );
+    }
   }
+
+  /**
+   * Convert message to log file ready message
+   * @param level The log level for example `WARN`
+   * @param message The message
+   * @param time The iso time
+   */
+  private formatMessageForLogFile(
+    level: string,
+    message: string,
+    time: string | null = null,
+  ) {
+    return `${time} ${level} ${message}`;
+  }
+
+  /**
+   * Enques the log message to be async added to the log file
+   * @param message The message to add to the log file
+   */
+  private enqueMessage(message: string) {}
 
   /**
    * Runs initialization such as making log folders on start and other needed functions
