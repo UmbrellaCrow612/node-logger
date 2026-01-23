@@ -202,11 +202,11 @@ class NodeLogger {
 
     logParts.push(`[${levelStr}]`);
 
-    const message = this.extractErrorInfo(content);
+    let message = `${this.extractErrorInfo(content)}`;
+    contents.forEach((m) => {
+      message += ` ${this.extractErrorInfo(m)}`;
+    });
     logParts.push(message);
-
-    const messages = contents.map((m) => this.extractErrorInfo(m));
-    logParts.push(...messages);
 
     if (this._options.showStackTrace) {
       logParts.push(this.getStackCall());
