@@ -78,9 +78,9 @@ class NodeLogger {
   private _isWriting: boolean = false;
 
   /**
-   * Indicates when the last clean happened should be every 24 hours
+   * Indicates when the last clean happened should be every 24 hours holds a UTC string of when it last happened
    */
-  private _lastCleanedOldLogs: Date | null = null;
+  private _lastCleanedOldLogsUtc: string | null = null;
 
   /**
    * Pass addtional options on initialization to change the loggers behaviour
@@ -132,6 +132,7 @@ class NodeLogger {
     try {
       if (this._options.saveToLogFile) {
         this.cleanupOldLogFiles();
+        this._lastCleanedOldLogsUtc = new Date().toUTCString();
       }
     } catch (error) {
       console.error(
@@ -140,6 +141,22 @@ class NodeLogger {
 
       throw error;
     }
+  }
+
+  /**
+   * Checks if 24 hours have passed since the last log cleanup.
+   */
+  private shouldCleanOldLogs(): boolean {
+    if (!this._lastCleanedOldLogsUtc) {
+      return true;
+    }
+
+    const lastCleaned = new Date(this._lastCleanedOldLogsUtc).getTime();
+    const now = new Date().getTime();
+
+    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+    return now - lastCleaned >= TWENTY_FOUR_HOURS_MS;
   }
 
   /**
@@ -174,6 +191,11 @@ class NodeLogger {
     else console.log(fullConsoleMessage);
 
     if (this._options.saveToLogFile) {
+      if (this.shouldCleanOldLogs()) {
+        this.cleanupOldLogFiles();
+        this._lastCleanedOldLogsUtc = new Date().toUTCString();
+      }
+
       const fileTime = this._options.showLogTime ? now.toUTCString() : "";
       this.enqueMessage(`${fileTime} ${level} ${message}`.trim());
     }
