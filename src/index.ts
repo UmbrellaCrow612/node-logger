@@ -54,7 +54,7 @@ type NodeLoggerOptions = {
 
 /**
  * Represents a logger used to log to node's stdout console and also save logs to log files, uses some blocking at the begining if you want to save output to log files
- * as it has to ensure it makes the folder and file, logs themselves are asynchronously added in queue system.
+ * as it has to ensure it makes the folder and file, logs themselves are asynchronously added in queue system then added to log files.
  */
 class NodeLogger {
   /**
@@ -88,7 +88,7 @@ class NodeLogger {
    */
   constructor(options: Partial<NodeLoggerOptions> = defaultOptions) {
     this._options = { ...defaultOptions, ...options };
-    console.log(this._options)
+    console.log(this._options);
 
     if (typeof this._options !== "object") {
       throw new TypeError(
@@ -177,8 +177,9 @@ class NodeLogger {
    * Log information
    * @param level The specific level of log message
    * @param message A message or error object or object
+   * @param contents Any other messages or error objects
    */
-  private log(level: LogLevel, content: unknown) {
+  private log(level: LogLevel, content: unknown, ...contents: unknown[]) {
     const now = new Date();
     const logParts: string[] = [];
 
@@ -194,9 +195,12 @@ class NodeLogger {
 
     logParts.push(`[${levelStr}]`);
 
-    const message =
-      level === "ERROR" ? this.extractErrorInfo(content) : String(content);
+    const message = this.extractErrorInfo(content);
     logParts.push(message);
+
+    const messages = contents.map((m) => this.extractErrorInfo(m));
+
+    logParts.push(...messages);
 
     const fullConsoleMessage = logParts.join(" ");
 
@@ -218,17 +222,19 @@ class NodeLogger {
   /**
    * Logs an informational message to the console
    * @param message The message to log
+   * @param mesages Any other message objects or errro objects
    */
-  public info(message: string) {
-    this.log("INFO", message);
+  public info(message: unknown, ...mesages: unknown[]) {
+    this.log("INFO", message, ...mesages);
   }
 
   /**
    * Logs a warning message to the console
    * @param message The message to log
+   * @param mesages Any other message objects or errro objects
    */
-  public warn(message: string) {
-    this.log("WARN", message);
+  public warn(message: unknown, ...mesages: unknown[]) {
+    this.log("WARN", message, ...mesages);
   }
 
   /**
@@ -240,9 +246,10 @@ class NodeLogger {
    * logger.error(new Error(""));
    * ```
    * @param messageOrError The error object or message to log
+   * @param mesages Any other message objects or errro objects
    */
-  public error(messageOrError: unknown) {
-    this.log("ERROR", messageOrError);
+  public error(messageOrError: unknown, ...mesages: unknown[]) {
+    this.log("ERROR", messageOrError, ...mesages);
   }
 
   /**
