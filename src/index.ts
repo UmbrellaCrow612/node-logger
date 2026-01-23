@@ -10,7 +10,6 @@ const defaultOptions: NodeLoggerOptions = {
   saveToLogFile: true,
   showLogTime: true,
   useColoredOutput: true,
-  showStackTrace: false,
 };
 
 /**
@@ -55,11 +54,6 @@ type NodeLoggerOptions = {
    * Indicates if it should add the time of when the log was made for a given log item (defaults to `true`)
    */
   showLogTime: boolean;
-
-  /**
-   * Indicates if it should show stack trace on log calls (defaults to `false`)
-   */
-  showStackTrace: boolean;
 };
 
 /**
@@ -211,10 +205,6 @@ class NodeLogger {
       message += ` ${this.extractErrorInfo(m)}`;
     });
     logParts.push(message);
-
-    if (this._options.showStackTrace) {
-      logParts.push(this.getStackCall());
-    }
 
     const fullConsoleMessage = logParts.join(" ");
 
@@ -462,16 +452,6 @@ class NodeLogger {
     } catch {
       return "[Unable to extract error information]";
     }
-  }
-
-  /**
-   * Get where the method is called on the stack
-   * @returns string
-   */
-  private getStackCall(): string {
-    const stack = new Error().stack?.split("\n") ?? [];
-    const caller = stack.find((line) => !line.includes("NodeLogger."));
-    return caller?.trim() ?? "[Unknown call site]";
   }
 }
 
