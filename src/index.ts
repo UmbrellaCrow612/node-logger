@@ -2,6 +2,11 @@ import nodeFs = require("node:fs");
 import path = require("node:path");
 
 /**
+ * Holds specific log levels and there colors to be rpinted in
+ */
+const colorMap = { INFO: "\x1b[34m", WARN: "\x1b[33m", ERROR: "\x1b[31m" };
+
+/**
  * Indicates which level of log should be used
  */
 type LogLevel = "WARN" | "INFO" | "ERROR";
@@ -59,7 +64,7 @@ class NodeLogger {
   /**
    * How many messages we cna hold beofre we start dropping old ones if we cannot write to log file
    */
-  private _maxQueueMessages = 10000;
+  private _maxQueueMessages = 500;
 
   /**
    * Indicates if a write operation is currently in progress
@@ -149,7 +154,6 @@ class NodeLogger {
       logParts.push(`[${timestamp}]`);
     }
 
-    const colorMap = { INFO: "\x1b[34m", WARN: "\x1b[33m", ERROR: "\x1b[31m" };
     const levelStr = this._options.useColoredOutput
       ? `${colorMap[level]}${level}\x1b[0m`
       : level;
