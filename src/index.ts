@@ -114,7 +114,7 @@ class NodeLogger {
     }
 
     // TODO: add process on exit and others to save any logs to log file
-    console.log(this._todaysLogFilePath)
+    console.log(this._todaysLogFilePath);
   }
 
   /**
@@ -145,20 +145,64 @@ class NodeLogger {
   }
 
   /**
-   * Gets the stack trace of the caller
-   * @param skipFrames Number of stack frames to skip (default is 2 to skip Error and this method)
-   * @returns The caller's stack trace location or null if not available
+   * Logs a warning message to the console
+   * @param message The message to log
    */
-  private getStackTrace(skipFrames: number = 2): string | null {
-    const stack = new Error().stack;
-    if (!stack) return null;
+  public warn(message: string) {
+    const logParts: string[] = [];
 
-    const stackLines = stack.split("\n");
-    const callerLine = stackLines[skipFrames + 1];
+    if (this._options.showLogTime) {
+      const now = new Date();
+      const timestamp = now.toISOString();
+      logParts.push(`[${timestamp}]`);
+    }
 
-    if (!callerLine) return null;
+    const level = this._options.useColoredOutput
+      ? "\x1b[33mWARN\x1b[0m"
+      : "WARN";
 
-    return callerLine.trim();
+    logParts.push(`[${level}]`);
+
+    logParts.push(message);
+
+    const fullMessage = logParts.join(" ");
+    console.warn(fullMessage);
+
+    // TODO: Add save to log file later enque it then async add itr back flushing it like logger.js
+  }
+
+  /**
+   * Logs an error message to the console - pass any message but it is reccomended you pass the actual error object so we can print as much information for you.
+   * 
+   * For example:
+   * 
+   * ```ts
+   * logger.error(new Error(""));
+   * ```
+   * @param messageOrError The error object or message to log
+   */
+  public error(messageOrError: unknown) {
+    const logParts: string[] = [];
+
+    if (this._options.showLogTime) {
+      const now = new Date();
+      const timestamp = now.toISOString();
+      logParts.push(`[${timestamp}]`);
+    }
+
+    const level = this._options.useColoredOutput
+      ? "\x1b[31mERROR\x1b[0m"
+      : "ERROR";
+
+    logParts.push(`[${level}]`);
+
+    const errorInfo = this.extractErrorInfo(messageOrError);
+    logParts.push(errorInfo);
+
+    const fullMessage = logParts.join(" ");
+    console.error(fullMessage);
+
+    // TODO: Add save to log file later enque it then async add itr back flushing it like logger.js
   }
 
   /**
