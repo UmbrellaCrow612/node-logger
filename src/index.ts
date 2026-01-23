@@ -132,23 +132,6 @@ class NodeLogger {
 
       throw error;
     }
-
-    if (this._options.saveToLogFile) {
-      process.on("exit", () => this.flushLogsSync());
-      process.on("SIGINT", () => {
-        this.flushLogsSync();
-        process.exit(0);
-      });
-      process.on("SIGTERM", () => {
-        this.flushLogsSync();
-        process.exit(0);
-      });
-      process.on("uncaughtException", (error) => {
-        console.error("Uncaught exception:", error);
-        this.flushLogsSync();
-        process.exit(1);
-      });
-    }
   }
 
   /**
@@ -272,7 +255,7 @@ class NodeLogger {
    * Synchronously flushes all remaining logs in the queue to the log file
    * Used during process exit to ensure no logs are lost
    */
-  private flushLogsSync() {
+  public flushLogsSync() {
     if (!this._todaysLogFilePath || this._messageQueue.length === 0) {
       return;
     }
