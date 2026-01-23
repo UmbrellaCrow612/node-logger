@@ -306,64 +306,36 @@ class NodeLogger {
   /**
    * Removes log files older than the retention period
    */
-  private cleanupOldLogFiles() {
+ private cleanupOldLogFiles() {
     try {
       const files = nodeFs.readdirSync(this._options.logFilesBasePath);
       const now = new Date();
-      const retentionMs =
-        this._options.logFileRetentionPeriodInDays * 24 * 60 * 60 * 1000;
+      const retentionMs = this._options.logFileRetentionPeriodInDays * 24 * 60 * 60 * 1000;
 
       for (const file of files) {
         if (!file.endsWith(".log")) continue;
 
-        try {
-          const dateString = file.replace(".log", "");
-          const fileDateParts = dateString.split("-");
+        const dateString = file.replace(".log", "");
+        const fileDate = new Date(`${dateString}T00:00:00Z`);
 
-          if (fileDateParts.length !== 3) {
-            console.warn(`Skipping file with invalid date format: ${file}`);
-            continue;
-          }
+        if (isNaN(fileDate.getTime())) continue;
 
-          const year = parseInt(fileDateParts[0] as any, 10);
-          const month = parseInt(fileDateParts[1] as any, 10) - 1; // JS months are 0-indexed
-          const day = parseInt(fileDateParts[2] as any, 10);
+        const fileAgeMs = now.getTime() - fileDate.getTime();
 
-          if (isNaN(year) || isNaN(month) || isNaN(day)) {
-            console.warn(`Skipping file with invalid date values: ${file}`);
-            continue;
-          }
-
-          const fileDate = new Date(year, month, day);
-
-          if (isNaN(fileDate.getTime())) {
-            console.warn(`Skipping file with invalid date: ${file}`);
-            continue;
-          }
-
-          const fileAgeMs = now.getTime() - fileDate.getTime();
-
-          if (fileAgeMs > retentionMs) {
-            const filePath = path.join(this._options.logFilesBasePath, file);
-            nodeFs.unlinkSync(filePath);
-            console.log(
-              `Deleted old log file: ${file} (age: ${Math.floor(fileAgeMs / (24 * 60 * 60 * 1000))} days)`,
-            );
-          }
-        } catch (error) {
-          console.error(
-            `Failed to process log file ${file}: ${this.extractErrorInfo(error)}`,
-          );
-          continue;
+        if (fileAgeMs > retentionMs) {
+          nodeFs.unlinkSync(path.join(this._options.logFilesBasePath, file));
         }
       }
     } catch (error) {
-      console.error(
-        `Failed to cleanup old log files: ${this.extractErrorInfo(error)}`,
-      );
-
-      throw error;
+      console.error(`Cleanup failed: ${this.extractErrorInfo(error)}`);
     }
+  }
+
+  /**
+   * Generates a UTC-based date string (YYYY-MM-DD)
+   */
+  private getUtcDateString(date: Date): string {
+    return date.toISOString().split("T")[0] as string;
   }
 
   /**
@@ -372,13 +344,8 @@ class NodeLogger {
    */
   private createTodaysLogFile(): string {
     try {
-      const today = new Date();
-      const year = today.getFullYear();
-      const month = String(today.getMonth() + 1).padStart(2, "0");
-      const day = String(today.getDate()).padStart(2, "0");
-
-      const dateString = `${year}-${month}-${day}`;
-      const fileName = `${dateString}.log`;
+      const now = new Date();
+      const fileName = `${this.getUtcDateString(now)}.log`;
       const filePath = path.join(this._options.logFilesBasePath, fileName);
 
       if (nodeFs.existsSync(filePath)) {
@@ -394,7 +361,7 @@ class NodeLogger {
       }
 
       try {
-        const header = `=== Log file created on ${dateString} ===\n\n`;
+        const header = `=== Log file created on ${this.getUtcDateString(now)} ===\n\n`;
         nodeFs.writeFileSync(filePath, header, { encoding: "utf8" });
 
         console.log(`Created new log file: ${fileName}`);
