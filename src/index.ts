@@ -86,8 +86,9 @@ class NodeLogger {
    * Pass addtional options on initialization to change the loggers behaviour
    * @param options Change the behaviour of the logger
    */
-  constructor(options: Partial<NodeLoggerOptions>) {
+  constructor(options: Partial<NodeLoggerOptions> = defaultOptions) {
     this._options = { ...defaultOptions, ...options };
+    console.log(this._options)
 
     if (typeof this._options !== "object") {
       throw new TypeError(
