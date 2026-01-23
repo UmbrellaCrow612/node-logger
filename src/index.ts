@@ -47,6 +47,16 @@ class NodeLogger {
   private _todaysLogFilePath: string | null = null;
 
   /**
+   * Queue for log messages waiting to be written to file
+   */
+  private _messageQueue: string[] = [];
+
+  /**
+   * Indicates if a write operation is currently in progress
+   */
+  private _isWriting: boolean = false;
+
+  /**
    * Pass addtional options on initialization to change the loggers behaviour
    * @param options Change the behaviour of the logger
    */
@@ -113,7 +123,22 @@ class NodeLogger {
       throw error;
     }
 
-    // TODO: add process on exit and others to save any logs to log file
+    if (this._options.saveToLogFile) {
+      process.on("exit", () => this.flushLogsSync());
+      process.on("SIGINT", () => {
+        this.flushLogsSync();
+        process.exit(0);
+      });
+      process.on("SIGTERM", () => {
+        this.flushLogsSync();
+        process.exit(0);
+      });
+      process.on("uncaughtException", (error) => {
+        console.error("Uncaught exception:", error);
+        this.flushLogsSync();
+        process.exit(1);
+      });
+    }
   }
 
   /**
@@ -246,7 +271,69 @@ class NodeLogger {
    * Enques the log message to be async added to the log file
    * @param message The message to add to the log file
    */
-  private enqueMessage(message: string) {}
+  private enqueMessage(message: string) {
+    this._messageQueue.push(message);
+    this.processQueue();
+  }
+
+  /**
+   * Processes the message queue asynchronously
+   */
+  private async processQueue() {
+    if (this._isWriting || !this._todaysLogFilePath) {
+      return;
+    }
+
+    if (this._messageQueue.length === 0) {
+      return;
+    }
+
+    this._isWriting = true;
+
+    const messages = [...this._messageQueue];
+    this._messageQueue = [];
+
+    try {
+      const content = messages.join("\n") + "\n";
+
+      await nodeFs.promises.appendFile(this._todaysLogFilePath, content, {
+        encoding: "utf8",
+      });
+    } catch (error) {
+      console.error(
+        `Failed to write logs to file: ${this.extractErrorInfo(error)}`,
+      );
+      this._messageQueue.unshift(...messages);
+    } finally {
+      this._isWriting = false;
+
+      if (this._messageQueue.length > 0) {
+        this.processQueue();
+      }
+    }
+  }
+
+  /**
+   * Synchronously flushes all remaining logs in the queue to the log file
+   * Used during process exit to ensure no logs are lost
+   */
+  private flushLogsSync() {
+    if (!this._todaysLogFilePath || this._messageQueue.length === 0) {
+      return;
+    }
+
+    try {
+      const content = this._messageQueue.join("\n") + "\n";
+      nodeFs.appendFileSync(this._todaysLogFilePath, content, {
+        encoding: "utf8",
+      });
+      this._messageQueue = [];
+    } catch (error) {
+      console.error(
+        `Failed to flush logs on exit: ${this.extractErrorInfo(error)}`,
+      );
+    }
+  }
 
   /**
    * Runs initialization such as making log folders on start and other needed functions
