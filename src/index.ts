@@ -38,7 +38,8 @@ type NodeLoggerOptions = {
 };
 
 /**
- * Represents a logger used to log to node's stdout console and also save logs to log files
+ * Represents a logger used to log to node's stdout console and also save logs to log files, uses some blocking at the begining if you want to save output to log files
+ * as it has to ensure it makes the folder and file, logs themselves are asynchronously added in queue system.
  */
 class NodeLogger {
   /**
@@ -122,6 +123,63 @@ class NodeLogger {
 
       throw error;
     }
+
+    // TODO: add process on exit and others to save any logs to log file
+    console.log(this._todaysLogFilePath)
+  }
+
+  /**
+   * Logs an informational message to the console
+   * @param message The message to log
+   */
+  public info(message: string) {
+    const logParts: string[] = [];
+
+    // Add timestamp if enabled
+    if (this._options.showLogTime) {
+      const now = new Date();
+      const timestamp = now.toISOString();
+      logParts.push(`[${timestamp}]`);
+    }
+
+    const level = this._options.useColoredOutput
+      ? "\x1b[34mINFO\x1b[0m"
+      : "INFO";
+
+    logParts.push(`[${level}]`);
+
+    logParts.push(message);
+
+    if (this._options.showStackTraces) {
+      const location = this.getStackTrace(2);
+      if (location) {
+        logParts.push(
+          `\n    ${this._options.useColoredOutput ? "\x1b[90m" : ""}${location}${this._options.useColoredOutput ? "\x1b[0m" : ""}`,
+        );
+      }
+    }
+
+    const fullMessage = logParts.join(" ");
+    console.log(fullMessage);
+
+    // TODO: Add save to log file later
+  }
+
+  /**
+   * Gets the stack trace of the caller
+   * @param skipFrames Number of stack frames to skip (default is 2 to skip Error and this method)
+   * @returns The caller's stack trace location or null if not available
+   */
+  private getStackTrace(skipFrames: number = 2): string | null {
+    const stack = new Error().stack;
+    if (!stack) return null;
+
+    const stackLines = stack.split("\n");
+    const callerLine = stackLines[skipFrames + 1];
+
+    if (!callerLine) return null;
+
+    return callerLine.trim();
   }
 
   /**
