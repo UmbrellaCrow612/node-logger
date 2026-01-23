@@ -21,12 +21,6 @@ type NodeLoggerOptions = {
   logFilesBasePath: string;
 
   /**
-   * Indicates if it should stack traces i.e the location of where the log was made on what line, useful to quickly navigate to the location using for example
-   * text editors like vs code (defaults to `true`)
-   */
-  showStackTraces: boolean;
-
-  /**
    * Indicates how long old log files should be kept (defaults to `30` days)
    */
   logFileRetentionPeriodInDays: number;
@@ -62,7 +56,6 @@ class NodeLogger {
       logFilesBasePath: "./logs",
       saveToLogFile: true,
       logFileRetentionPeriodInDays: 30,
-      showStackTraces: true,
       showLogTime: true,
     },
   ) {
@@ -100,10 +93,6 @@ class NodeLogger {
       throw new TypeError("showLogTime must be a boolean");
     }
 
-    if (typeof this._options.showStackTraces !== "boolean") {
-      throw new TypeError("showStackTraces must be a boolean");
-    }
-
     if (typeof this._options.useColoredOutput !== "boolean") {
       throw new TypeError("useColoredOutput must be a boolean");
     }
@@ -135,7 +124,6 @@ class NodeLogger {
   public info(message: string) {
     const logParts: string[] = [];
 
-    // Add timestamp if enabled
     if (this._options.showLogTime) {
       const now = new Date();
       const timestamp = now.toISOString();
@@ -150,19 +138,10 @@ class NodeLogger {
 
     logParts.push(message);
 
-    if (this._options.showStackTraces) {
-      const location = this.getStackTrace(2);
-      if (location) {
-        logParts.push(
-          `\n    ${this._options.useColoredOutput ? "\x1b[90m" : ""}${location}${this._options.useColoredOutput ? "\x1b[0m" : ""}`,
-        );
-      }
-    }
-
     const fullMessage = logParts.join(" ");
     console.log(fullMessage);
 
-    // TODO: Add save to log file later
+    // TODO: Add save to log file later enque it then async add itr back flushing it like logger.js
   }
 
   /**
