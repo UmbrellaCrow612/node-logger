@@ -1,5 +1,6 @@
 import nodeFs = require("node:fs");
 import path = require("node:path");
+import nodeUtil = require("node:util");
 
 /**
  * Holds default options for the logger
@@ -366,92 +367,18 @@ class NodeLogger {
    * @returns A detailed string representation of the error/object
    */
   private extractErrorInfo(error: unknown): string {
-    const parts: string[] = [];
-
     if (error === null) return "null";
     if (error === undefined) return "undefined";
+    if (typeof error !== "object") return String(error);
 
-    if (typeof error !== "object") {
-      return String(error);
-    }
-
-    if (error instanceof Error) {
-      if (error.name) parts.push(`Name: ${error.name}`);
-      if (error.message) parts.push(`Message: ${error.message}`);
-
-      if (error.stack) {
-        parts.push(`Stack: ${error.stack}`);
-      }
-
-      const nodeError = error as any;
-      if (nodeError.code) parts.push(`Code: ${nodeError.code}`);
-      if (nodeError.errno) parts.push(`Errno: ${nodeError.errno}`);
-      if (nodeError.syscall) parts.push(`Syscall: ${nodeError.syscall}`);
-      if (nodeError.path) parts.push(`Path: ${nodeError.path}`);
-      if (nodeError.port) parts.push(`Port: ${nodeError.port}`);
-      if (nodeError.address) parts.push(`Address: ${nodeError.address}`);
-      if (nodeError.dest) parts.push(`Dest: ${nodeError.dest}`);
-    }
-
-    try {
-      const obj = error as Record<string, unknown>;
-      const keys = Object.keys(obj);
-
-      for (const key of keys) {
-        if (
-          error instanceof Error &&
-          ["name", "message", "stack"].includes(key)
-        ) {
-          continue;
-        }
-
-        try {
-          const value = obj[key];
-
-          if (value === null) {
-            parts.push(`${key}: null`);
-          } else if (value === undefined) {
-            parts.push(`${key}: undefined`);
-          } else if (typeof value === "function") {
-            parts.push(`${key}: [Function]`);
-          } else if (typeof value === "object") {
-            try {
-              const stringified = JSON.stringify(value, null, 2);
-              parts.push(`${key}: ${stringified}`);
-            } catch {
-              parts.push(`${key}: [Object - could not stringify]`);
-            }
-          } else {
-            parts.push(`${key}: ${String(value)}`);
-          }
-        } catch {
-          parts.push(`${key}: [Could not access property]`);
-        }
-      }
-    } catch {}
-
-    if (parts.length > 0) {
-      return parts.join("\n");
-    }
-
-    try {
-      const obj = error as any;
-
-      if (
-        typeof obj.toString === "function" &&
-        obj.toString !== Object.prototype.toString
-      ) {
-        return obj.toString();
-      }
-
-      if (typeof obj.toJSON === "function") {
-        return JSON.stringify(obj.toJSON(), null, 2);
-      }
-
-      return JSON.stringify(error, null, 2);
-    } catch {
-      return "[Unable to extract error information]";
-    }
+    return nodeUtil.inspect(error, {
+      showHidden: true,
+      depth: null,
+      colors: false,
+      compact: false,
+      sorted: true,
+      maxArrayLength: 100,
+    });
   }
 }
 
