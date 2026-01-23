@@ -10,6 +10,7 @@ const defaultOptions: NodeLoggerOptions = {
   saveToLogFile: true,
   showLogTime: true,
   useColoredOutput: true,
+  showStackTrace: false,
 };
 
 /**
@@ -50,6 +51,11 @@ type NodeLoggerOptions = {
    * Indicates if it should add the time of when the log was made for a given log item (defaults to `true`)
    */
   showLogTime: boolean;
+
+  /**
+   * Indicates if it should show stack trace on log calls (defaults to `false`)
+   */
+  showStackTrace: boolean;
 };
 
 /**
@@ -91,7 +97,6 @@ class NodeLogger {
    */
   constructor(options: Partial<NodeLoggerOptions> = defaultOptions) {
     this._options = { ...defaultOptions, ...options };
-    console.log(this._options);
 
     if (typeof this._options !== "object") {
       throw new TypeError(
@@ -202,6 +207,10 @@ class NodeLogger {
 
     const messages = contents.map((m) => this.extractErrorInfo(m));
     logParts.push(...messages);
+
+    if (this._options.showStackTrace) {
+      logParts.push(this.getStackCall());
+    }
 
     const fullConsoleMessage = logParts.join(" ");
 
@@ -460,6 +469,37 @@ class NodeLogger {
     } catch {
       return "[Unable to extract error information]";
     }
+  }
+
+  /**
+   * Used to get the callstack string of where the log was made
+   * @returns The call stack string
+   */
+  private getStackCall(): string {
+    const error = new Error();
+
+    if (!error.stack) {
+      return "[Unknown call site]";
+    }
+
+    const lines = error.stack.split("\n");
+
+    /**
+     * Typical stack:
+     * 0: Error
+     * 1: at NodeLogger.getStackCall (...)
+     * 2: at NodeLogger.log (...)
+     * 3: at NodeLogger.info / warn / error (...)
+     * 4: at ACTUAL CALL SITE  👈
+     */
+
+    const callerLine = lines[4];
+
+    if (!callerLine) {
+      return "[Unknown call site]";
+    }
+
+    return callerLine.trim();
   }
 }
 
