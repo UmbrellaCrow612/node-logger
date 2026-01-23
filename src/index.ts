@@ -1,3 +1,6 @@
+import nodeFs = require("node:fs");
+import path = require("node:path");
+
 /**
  * List of options you can pass to change the logger behaviour
  */
@@ -13,7 +16,7 @@ type NodeLoggerOptions = {
   saveToLogFile: boolean;
 
   /**
-   * The base path / path to the folder to save the log outputs to (defaults to `./logs`)
+   * The base path / path to the folder to save the log outputs to (defaults to `./logs`) then is converted to a absoulte path interally
    */
   logFilesBasePath: string;
 
@@ -42,6 +45,11 @@ class NodeLogger {
    * Holds the options passed to the logger
    */
   private _options: NodeLoggerOptions;
+
+  /**
+   * Indicates if all options passed on initialization are valid, if it not then any operation performed outside will fail
+   */
+  private _isValid = false;
 
   /**
    * Pass addtional options on initialization to change the loggers behaviour
@@ -77,7 +85,8 @@ class NodeLogger {
 
     if (
       typeof this._options.logFilesBasePath !== "string" ||
-      this._options.logFilesBasePath.trim() === ""
+      (typeof this._options.logFilesBasePath === "string" &&
+        this._options.logFilesBasePath.trim() === "")
     ) {
       throw new TypeError("logFilesBasePath must be a non empty string");
     }
@@ -89,6 +98,31 @@ class NodeLogger {
     if (typeof this._options.showLogTime !== "boolean") {
       throw new TypeError("showLogTime must be a boolean");
     }
+
+    if (typeof this._options.showStackTraces !== "boolean") {
+      throw new TypeError("showStackTraces must be a boolean");
+    }
+
+    if (typeof this._options.useColoredOutput !== "boolean") {
+      throw new TypeError("useColoredOutput must be a boolean");
+    }
+
+    this._options.logFilesBasePath = path.resolve(
+      this._options.logFilesBasePath,
+    );
+
+    this._isValid = true;
+    this.init()
+  }
+
+  /**
+   * Runs initialization such as making log folders on start and other needed functions
+   */
+  private init() {
+    if (!this._isValid) throw new Error("Invalid state of logger");
+
+    // create the base path
+    // clean up any old logs files
   }
 }
 
