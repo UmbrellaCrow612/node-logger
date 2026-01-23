@@ -112,7 +112,9 @@ class NodeLogger {
     );
 
     try {
-      this.init();
+      if (this._options.saveToLogFile) {
+        this.initLogFileAndFolder();
+      }
     } catch (error) {
       console.error(
         `Failed to initlize logger error: ${this.extractErrorInfo(error)}`,
@@ -125,7 +127,7 @@ class NodeLogger {
   /**
    * Runs initialization such as making log folders on start and other needed functions
    */
-  private init() {
+  private initLogFileAndFolder() {
     if (nodeFs.existsSync(this._options.logFilesBasePath)) {
       const stats = nodeFs.statSync(this._options.logFilesBasePath);
 
@@ -144,10 +146,8 @@ class NodeLogger {
       }
     }
 
-    if (this._options.saveToLogFile) {
-      this.cleanupOldLogFiles();
-      this._todaysLogFilePath = this.createTodaysLogFile();
-    }
+    this.cleanupOldLogFiles();
+    this._todaysLogFilePath = this.createTodaysLogFile();
   }
 
   /**
