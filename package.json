@@ -1,0 +1,17 @@
+{
+  "name": "node-logger",
+  "version": "0.0.1",
+  "description": "A node js logger used to log information to the console but also save it to log files.",
+  "main": "index.js",
+  "scripts": {},
+  "keywords": [
+    "node",
+    "logger"
+  ],
+  "author": "Yousaf Wazir",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^25.0.10",
+    "typescript": "^5.9.3"
+  }
+}
