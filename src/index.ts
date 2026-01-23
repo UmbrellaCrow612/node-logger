@@ -2,6 +2,11 @@ import nodeFs = require("node:fs");
 import path = require("node:path");
 
 /**
+ * Indicates which level of log should be used
+ */
+type LogLevel = "WARN" | "INFO" | "ERROR";
+
+/**
  * List of options you can pass to change the logger behaviour
  */
 type NodeLoggerOptions = {
@@ -50,6 +55,11 @@ class NodeLogger {
    * Queue for log messages waiting to be written to file
    */
   private _messageQueue: string[] = [];
+
+  /**
+   * How many messages we cna hold beofre we start dropping old ones if we cannot write to log file
+   */
+  private _maxQueueMessages = 10000;
 
   /**
    * Indicates if a write operation is currently in progress
@@ -142,38 +152,49 @@ class NodeLogger {
   }
 
   /**
-   * Logs an informational message to the console
-   * @param message The message to log
+   * Log information
+   * @param level The specific level of log message
+   * @param message A message or error object or object
    */
-  public info(message: string) {
+  private log(level: LogLevel, content: unknown) {
+    const now = new Date();
     const logParts: string[] = [];
 
     if (this._options.showLogTime) {
       const now = new Date();
-      const timestamp = now.toISOString();
+      const timestamp = now.toUTCString();
       logParts.push(`[${timestamp}]`);
     }
 
-    const level = this._options.useColoredOutput
-      ? "\x1b[34mINFO\x1b[0m"
-      : "INFO";
+    const colorMap = { INFO: "\x1b[34m", WARN: "\x1b[33m", ERROR: "\x1b[31m" };
+    const levelStr = this._options.useColoredOutput
+      ? `${colorMap[level]}${level}\x1b[0m`
+      : level;
 
-    logParts.push(`[${level}]`);
+    logParts.push(`[${levelStr}]`);
 
+    const message =
+      level === "ERROR" ? this.extractErrorInfo(content) : String(content);
     logParts.push(message);
 
-    const fullMessage = logParts.join(" ");
-    console.log(fullMessage);
+    const fullConsoleMessage = logParts.join(" ");
+
+    if (level === "ERROR") console.error(fullConsoleMessage);
+    else if (level === "WARN") console.warn(fullConsoleMessage);
+    else console.log(fullConsoleMessage);
 
     if (this._options.saveToLogFile) {
-      this.enqueMessage(
-        this.formatMessageForLogFile(
-          "INFO",
-          message,
-          this._options.showLogTime ? new Date().toISOString() : null,
-        ),
-      );
+      const fileTime = this._options.showLogTime ? now.toUTCString() : "";
+      this.enqueMessage(`${fileTime} ${level} ${message}`.trim());
     }
+  }
+
+  /**
+   * Logs an informational message to the console
+   * @param message The message to log
+   */
+  public info(message: string) {
+    this.log("INFO", message);
   }
 
   /**
@@ -181,34 +202,7 @@ class NodeLogger {
    * @param message The message to log
    */
   public warn(message: string) {
-    const logParts: string[] = [];
-
-    if (this._options.showLogTime) {
-      const now = new Date();
-      const timestamp = now.toISOString();
-      logParts.push(`[${timestamp}]`);
-    }
-
-    const level = this._options.useColoredOutput
-      ? "\x1b[33mWARN\x1b[0m"
-      : "WARN";
-
-    logParts.push(`[${level}]`);
-
-    logParts.push(message);
-
-    const fullMessage = logParts.join(" ");
-    console.warn(fullMessage);
-
-    if (this._options.saveToLogFile) {
-      this.enqueMessage(
-        this.formatMessageForLogFile(
-          "WARN",
-          message,
-          this._options.showLogTime ? new Date().toISOString() : null,
-        ),
-      );
-    }
+    this.log("WARN", message);
   }
 
   /**
@@ -222,49 +216,7 @@ class NodeLogger {
    * @param messageOrError The error object or message to log
    */
   public error(messageOrError: unknown) {
-    const logParts: string[] = [];
-
-    if (this._options.showLogTime) {
-      const now = new Date();
-      const timestamp = now.toISOString();
-      logParts.push(`[${timestamp}]`);
-    }
-
-    const level = this._options.useColoredOutput
-      ? "\x1b[31mERROR\x1b[0m"
-      : "ERROR";
-
-    logParts.push(`[${level}]`);
-
-    const errorInfo = this.extractErrorInfo(messageOrError);
-    logParts.push(errorInfo);
-
-    const fullMessage = logParts.join(" ");
-    console.error(fullMessage);
-
-    if (this._options.saveToLogFile) {
-      this.enqueMessage(
-        this.formatMessageForLogFile(
-          "ERROR",
-          errorInfo,
-          this._options.showLogTime ? new Date().toISOString() : null,
-        ),
-      );
-    }
-  }
-
-  /**
-   * Convert message to log file ready message
-   * @param level The log level for example `WARN`
-   * @param message The message
-   * @param time The iso time
-   */
-  private formatMessageForLogFile(
-    level: string,
-    message: string,
-    time: string | null = null,
-  ) {
-    return `${time} ${level} ${message}`;
+    this.log("ERROR", messageOrError);
   }
 
   /**
@@ -272,6 +224,9 @@ class NodeLogger {
    * @param message The message to add to the log file
    */
   private enqueMessage(message: string) {
+    if (this._messageQueue.length >= this._maxQueueMessages) {
+      this._messageQueue.shift();
+    }
     this._messageQueue.push(message);
     this.processQueue();
   }
