@@ -1,6 +1,14 @@
 import nodeFs = require("node:fs");
 import path = require("node:path");
 
+const defaultOptions: NodeLoggerOptions = {
+  logFileRetentionPeriodInDays: 30,
+  logFilesBasePath: "./logs",
+  saveToLogFile: true,
+  showLogTime: true,
+  useColoredOutput: true,
+};
+
 /**
  * Holds specific log levels and there colors to be rpinted in
  */
@@ -75,16 +83,8 @@ class NodeLogger {
    * Pass addtional options on initialization to change the loggers behaviour
    * @param options Change the behaviour of the logger
    */
-  constructor(
-    options: NodeLoggerOptions = {
-      useColoredOutput: true,
-      logFilesBasePath: "./logs",
-      saveToLogFile: true,
-      logFileRetentionPeriodInDays: 30,
-      showLogTime: true,
-    },
-  ) {
-    this._options = options;
+  constructor(options: Partial<NodeLoggerOptions>) {
+    this._options = { ...defaultOptions, ...options };
 
     if (typeof this._options !== "object") {
       throw new TypeError(
@@ -306,11 +306,12 @@ class NodeLogger {
   /**
    * Removes log files older than the retention period
    */
- private cleanupOldLogFiles() {
+  private cleanupOldLogFiles() {
     try {
       const files = nodeFs.readdirSync(this._options.logFilesBasePath);
       const now = new Date();
-      const retentionMs = this._options.logFileRetentionPeriodInDays * 24 * 60 * 60 * 1000;
+      const retentionMs =
+        this._options.logFileRetentionPeriodInDays * 24 * 60 * 60 * 1000;
 
       for (const file of files) {
         if (!file.endsWith(".log")) continue;
