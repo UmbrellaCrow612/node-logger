@@ -1,6 +1,6 @@
 {
   "name": "node-logy",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A lightweight Node.js logging utility that outputs logs to the console and writes them to rotating log files. Supports different log levels, timestamps, and customizable formatting for production-ready applications.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,6 +27,7 @@
     "README.md",
     "dist"
   ],
+  "homepage": "https://github.com/UmbrellaCrow612/node-logger?tab=readme-ov-file#node-logger",
   "devDependencies": {
     "@types/node": "^25.0.10",
     "ts-node": "^10.9.2",
