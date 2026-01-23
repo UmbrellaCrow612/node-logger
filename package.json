@@ -1,15 +1,32 @@
 {
   "name": "node-logger",
   "version": "0.0.1",
-  "description": "A node js logger used to log information to the console but also save it to log files.",
-  "main": "index.js",
+  "description": "A lightweight Node.js logging utility that outputs logs to the console and writes them to rotating log files. Supports different log levels, timestamps, and customizable formatting for production-ready applications.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {},
   "keywords": [
     "node",
-    "logger"
+    "nodejs",
+    "logger",
+    "logging",
+    "log",
+    "logfile",
+    "file-logging",
+    "console-logging",
+    "debug",
+    "info",
+    "warn",
+    "error",
+    "typescript",
+    "utility"
   ],
   "author": "Yousaf Wazir",
   "license": "ISC",
+  "files": [
+    "README.md",
+    "dist"
+  ],
   "devDependencies": {
     "@types/node": "^25.0.10",
     "ts-node": "^10.9.2",
