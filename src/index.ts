@@ -16,7 +16,11 @@ const defaultOptions: NodeLoggerOptions = {
 /**
  * Holds specific log levels and their colors to be printed in
  */
-const colorMap = { INFO: "\x1b[34m", WARN: "\x1b[33m", ERROR: "\x1b[31m" };
+const colorMap: Record<LogLevel, string> = {
+  INFO: "\x1b[34m",
+  WARN: "\x1b[33m",
+  ERROR: "\x1b[31m",
+};
 
 /**
  * Indicates which level of log should be used
@@ -293,37 +297,26 @@ class NodeLogger {
    * Processes the message queue asynchronously
    */
   private async processQueue() {
-    if (this._isWriting) {
-      return;
-    }
-
-    if (this._messageQueue.length === 0) {
-      return;
-    }
-
+    if (this._isWriting) return;
     this._isWriting = true;
 
-    const messages = [...this._messageQueue];
-    this._messageQueue = [];
-
-    try {
-      const content = messages.join("\n") + "\n";
-
-      await nodeFs.promises.appendFile(this.getTodaysLogFilePath(), content, {
-        encoding: "utf8",
-      });
-    } catch (error) {
-      console.error(
-        `Failed to write logs to file: ${this.extractErrorInfo(error)}`,
-      );
-      this._messageQueue.unshift(...messages);
-    } finally {
-      this._isWriting = false;
-
-      if (this._messageQueue.length > 0) {
-        this.processQueue();
+    while (this._messageQueue.length > 0) {
+      const messages = this._messageQueue.splice(0);
+      try {
+        const content = messages.join("\n") + "\n";
+        await nodeFs.promises.appendFile(this.getTodaysLogFilePath(), content, {
+          encoding: "utf8",
+        });
+      } catch (error) {
+        console.error(
+          `Failed to write logs to file: ${this.extractErrorInfo(error)}`,
+        );
+        this._messageQueue.unshift(...messages);
+        break;
       }
     }
+
+    this._isWriting = false;
   }
 
   /**
@@ -472,34 +465,13 @@ class NodeLogger {
   }
 
   /**
-   * Used to get the callstack string of where the log was made
-   * @returns The call stack string
+   * Get where the method is called on the stack
+   * @returns string
    */
   private getStackCall(): string {
-    const error = new Error();
-
-    if (!error.stack) {
-      return "[Unknown call site]";
-    }
-
-    const lines = error.stack.split("\n");
-
-    /**
-     * Typical stack:
-     * 0: Error
-     * 1: at NodeLogger.getStackCall (...)
-     * 2: at NodeLogger.log (...)
-     * 3: at NodeLogger.info / warn / error (...)
-     * 4: at ACTUAL CALL SITE  👈
-     */
-
-    const callerLine = lines[4];
-
-    if (!callerLine) {
-      return "[Unknown call site]";
-    }
-
-    return callerLine.trim();
+    const stack = new Error().stack?.split("\n") ?? [];
+    const caller = stack.find((line) => !line.includes("NodeLogger."));
+    return caller?.trim() ?? "[Unknown call site]";
   }
 }
 
