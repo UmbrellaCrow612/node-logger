@@ -13,7 +13,7 @@ const defaultOptions: NodeLoggerOptions = {
 };
 
 /**
- * Holds specific log levels and there colors to be rpinted in
+ * Holds specific log levels and their colors to be printed in
  */
 const colorMap = { INFO: "\x1b[34m", WARN: "\x1b[33m", ERROR: "\x1b[31m" };
 
@@ -37,7 +37,7 @@ type NodeLoggerOptions = {
   saveToLogFile: boolean;
 
   /**
-   * The base path / path to the folder to save the log outputs to (defaults to `./logs`) then is converted to a absoulte path interally
+   * The base path / path to the folder to save the log outputs to (defaults to `./logs`) then is converted to an absolute path internally
    */
   logFilesBasePath: string;
 
@@ -53,8 +53,10 @@ type NodeLoggerOptions = {
 };
 
 /**
- * Represents a logger used to log to node's stdout console and also save logs to log files, uses some blocking at the begining if you want to save output to log files
- * as it has to ensure it makes the folder and file, logs themselves are asynchronously added in queue system then added to log files.
+ * Represents a logger used to log to node's stdout console and also save logs to log files.
+ * Uses some blocking at the beginning if you want to save output to log files
+ * as it has to ensure it makes the folder and file.
+ * Logs themselves are asynchronously added in a queue system then added to log files.
  */
 class NodeLogger {
   /**
@@ -68,7 +70,7 @@ class NodeLogger {
   private _messageQueue: string[] = [];
 
   /**
-   * How many messages we cna hold beofre we start dropping old ones if we cannot write to log file
+   * How many messages we can hold before we start dropping old ones if we cannot write to log file
    */
   private _maxQueueMessages = 500;
 
@@ -78,12 +80,13 @@ class NodeLogger {
   private _isWriting: boolean = false;
 
   /**
-   * Indicates when the last clean happened should be every 24 hours holds a UTC string of when it last happened
+   * Indicates when the last clean happened; should be every 24 hours.
+   * Holds a UTC string of when it last happened.
    */
   private _lastCleanedOldLogsUtc: string | null = null;
 
   /**
-   * Pass addtional options on initialization to change the loggers behaviour
+   * Pass additional options on initialization to change the logger's behaviour
    * @param options Change the behaviour of the logger
    */
   constructor(options: Partial<NodeLoggerOptions> = defaultOptions) {
@@ -92,7 +95,7 @@ class NodeLogger {
 
     if (typeof this._options !== "object") {
       throw new TypeError(
-        "Options passed cannot be null or undefined it must be a object",
+        "Options passed cannot be null or undefined; it must be an object",
       );
     }
 
@@ -111,7 +114,7 @@ class NodeLogger {
       (typeof this._options.logFilesBasePath === "string" &&
         this._options.logFilesBasePath.trim() === "")
     ) {
-      throw new TypeError("logFilesBasePath must be a non empty string");
+      throw new TypeError("logFilesBasePath must be a non-empty string");
     }
 
     if (typeof this._options.saveToLogFile !== "boolean") {
@@ -150,7 +153,7 @@ class NodeLogger {
       }
     } catch (error) {
       console.error(
-        `Failed to initlize logger error: ${this.extractErrorInfo(error)}`,
+        `Failed to initialize logger error: ${this.extractErrorInfo(error)}`,
       );
 
       throw error;
@@ -176,7 +179,7 @@ class NodeLogger {
   /**
    * Log information
    * @param level The specific level of log message
-   * @param message A message or error object or object
+   * @param content A message or error object or object
    * @param contents Any other messages or error objects
    */
   private log(level: LogLevel, content: unknown, ...contents: unknown[]) {
@@ -184,7 +187,6 @@ class NodeLogger {
     const logParts: string[] = [];
 
     if (this._options.showLogTime) {
-      const now = new Date();
       const timestamp = now.toUTCString();
       logParts.push(`[${timestamp}]`);
     }
@@ -199,7 +201,6 @@ class NodeLogger {
     logParts.push(message);
 
     const messages = contents.map((m) => this.extractErrorInfo(m));
-
     logParts.push(...messages);
 
     const fullConsoleMessage = logParts.join(" ");
@@ -222,23 +223,24 @@ class NodeLogger {
   /**
    * Logs an informational message to the console
    * @param message The message to log
-   * @param mesages Any other message objects or errro objects
+   * @param messages Any other message objects or error objects
    */
-  public info(message: unknown, ...mesages: unknown[]) {
-    this.log("INFO", message, ...mesages);
+  public info(message: unknown, ...messages: unknown[]) {
+    this.log("INFO", message, ...messages);
   }
 
   /**
    * Logs a warning message to the console
    * @param message The message to log
-   * @param mesages Any other message objects or errro objects
+   * @param messages Any other message objects or error objects
    */
-  public warn(message: unknown, ...mesages: unknown[]) {
-    this.log("WARN", message, ...mesages);
+  public warn(message: unknown, ...messages: unknown[]) {
+    this.log("WARN", message, ...messages);
   }
 
   /**
-   * Logs an error message to the console - pass any message but it is reccomended you pass the actual error object so we can print as much information for you.
+   * Logs an error message to the console.
+   * It is recommended you pass the actual error object so we can print as much information as possible.
    *
    * For example:
    *
@@ -246,16 +248,17 @@ class NodeLogger {
    * logger.error(new Error(""));
    * ```
    * @param messageOrError The error object or message to log
-   * @param mesages Any other message objects or errro objects
+   * @param messages Any other message objects or error objects
    */
-  public error(messageOrError: unknown, ...mesages: unknown[]) {
-    this.log("ERROR", messageOrError, ...mesages);
+  public error(messageOrError: unknown, ...messages: unknown[]) {
+    this.log("ERROR", messageOrError, ...messages);
   }
 
   /**
-   * Gets todays log file path - because if it runs 24 hours we need to re compute it each time
-   * to make sure we don't write to stale logs files
-   * the format is as follow base path provided then the filename is `YYYY-MM-DD`
+   * Gets today's log file path.
+   * Because if it runs for 24 hours we need to recompute it each time
+   * to make sure we don't write to stale log files.
+   * The format is as follows: base path provided, then the filename is `YYYY-MM-DD`
    */
   private getTodaysLogFilePath(): string {
     const date = new Date().toISOString().split("T")[0] as string;
@@ -266,7 +269,7 @@ class NodeLogger {
   }
 
   /**
-   * Enques the log message to be async added to the log file
+   * Enqueues the log message to be asynchronously added to the log file
    * @param message The message to add to the log file
    */
   private enqueMessage(message: string) {
@@ -315,8 +318,8 @@ class NodeLogger {
   }
 
   /**
-   * Synchronously flushes all remaining logs in the queue to the log file
-   * Used during process exit to ensure no logs are lost, use this when your process is going to exit
+   * Synchronously flushes all remaining logs in the queue to the log file.
+   * Used during process exit to ensure no logs are lost.
    */
   public flushLogsSync() {
     if (this._messageQueue.length === 0) {
