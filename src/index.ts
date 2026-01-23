@@ -1,27 +1,65 @@
 import nodeFs = require("node:fs");
 import path = require("node:path");
 
+/**
+ * List of options you can pass to change the logger behaviour
+ */
 type NodeLoggerOptions = {
+  /**
+   * Indicates if output produced specifically to the stdout console should be colored (defaults to `true`)
+   */
   useColoredOutput: boolean;
+
+  /**
+   * Indicates if stdout console output produced by this logger should be saved to log files (defaults to `true`)
+   */
   saveToLogFile: boolean;
+
+  /**
+   * The base path / path to the folder to save the log outputs to (defaults to `./logs`) then is converted to a absoulte path interally
+   */
   logFilesBasePath: string;
+
+  /**
+   * Indicates how long old log files should be kept (defaults to `30` days)
+   */
   logFileRetentionPeriodInDays: number;
+
+  /**
+   * Indicates if it should add the time of when the log was made for a given log item (defaults to `true`)
+   */
   showLogTime: boolean;
 };
 
-type LogLevel = "INFO" | "WARN" | "ERROR";
-
+/**
+ * Represents a logger used to log to node's stdout console and also save logs to log files, uses some blocking at the begining if you want to save output to log files
+ * as it has to ensure it makes the folder and file, logs themselves are asynchronously added in queue system.
+ */
 class NodeLogger {
+  /**
+   * Holds the options passed to the logger
+   */
   private _options: NodeLoggerOptions;
+
+  /**
+   * Holds path to todays log file to append new logs to or null if they arent saving logs to files
+   */
   private _todaysLogFilePath: string | null = null;
+
+  /**
+   * Queue for log messages waiting to be written to file
+   */
   private _messageQueue: string[] = [];
+
+  /**
+   * Indicates if a write operation is currently in progress
+   */
   private _isWriting: boolean = false;
 
-  private static _listenersAttached = false;
-  private static _instances: NodeLogger[] = [];
-
-  private readonly MAX_QUEUE_SIZE = 10000;
-
+  /**
+   * Pass addtional options on initialization to change the loggers behaviour
+   * @param options Change the behaviour of the logger
+   */
   constructor(
     options: NodeLoggerOptions = {
       useColoredOutput: true,
@@ -31,241 +69,503 @@ class NodeLogger {
       showLogTime: true,
     },
   ) {
-    this.validateOptions(options);
     this._options = options;
+
+    if (typeof this._options !== "object") {
+      throw new TypeError(
+        "Options passed cannot be null or undefined it must be a object",
+      );
+    }
+
+    if (
+      typeof this._options.logFileRetentionPeriodInDays !== "number" ||
+      (typeof this._options.logFileRetentionPeriodInDays === "number" &&
+        this._options.logFileRetentionPeriodInDays <= 0)
+    ) {
+      throw new TypeError(
+        "logFileRetentionPeriodInDays must be a number and greater than 0",
+      );
+    }
+
+    if (
+      typeof this._options.logFilesBasePath !== "string" ||
+      (typeof this._options.logFilesBasePath === "string" &&
+        this._options.logFilesBasePath.trim() === "")
+    ) {
+      throw new TypeError("logFilesBasePath must be a non empty string");
+    }
+
+    if (typeof this._options.saveToLogFile !== "boolean") {
+      throw new TypeError("saveToLogFile must be a boolean");
+    }
+
+    if (typeof this._options.showLogTime !== "boolean") {
+      throw new TypeError("showLogTime must be a boolean");
+    }
+
+    if (typeof this._options.useColoredOutput !== "boolean") {
+      throw new TypeError("useColoredOutput must be a boolean");
+    }
+
     this._options.logFilesBasePath = path.resolve(
       this._options.logFilesBasePath,
     );
 
-    if (this._options.saveToLogFile) {
-      try {
+    try {
+      if (this._options.saveToLogFile) {
         this.initLogFileAndFolder();
-        NodeLogger._instances.push(this);
-        this.attachProcessListeners();
-      } catch (error) {
-        console.error(
-          `Failed to initialize logger: ${this.extractErrorInfo(error)}`,
-        );
-        throw error;
       }
+    } catch (error) {
+      console.error(
+        `Failed to initlize logger error: ${this.extractErrorInfo(error)}`,
+      );
+
+      throw error;
+    }
+
+    if (this._options.saveToLogFile) {
+      process.on("exit", () => this.flushLogsSync());
+      process.on("SIGINT", () => {
+        this.flushLogsSync();
+        process.exit(0);
+      });
+      process.on("SIGTERM", () => {
+        this.flushLogsSync();
+        process.exit(0);
+      });
+      process.on("uncaughtException", (error) => {
+        console.error("Uncaught exception:", error);
+        this.flushLogsSync();
+        process.exit(1);
+      });
     }
   }
 
-  private validateOptions(options: NodeLoggerOptions) {
-    if (!options || typeof options !== "object")
-      throw new TypeError("Options must be an object");
-    if (
-      typeof options.logFileRetentionPeriodInDays !== "number" ||
-      options.logFileRetentionPeriodInDays <= 0
-    ) {
-      throw new TypeError("logFileRetentionPeriodInDays must be a number > 0");
-    }
-    if (
-      typeof options.logFilesBasePath !== "string" ||
-      options.logFilesBasePath.trim() === ""
-    ) {
-      throw new TypeError("logFilesBasePath must be a non-empty string");
-    }
-    if (typeof options.saveToLogFile !== "boolean")
-      throw new TypeError("saveToLogFile must be a boolean");
-    if (typeof options.showLogTime !== "boolean")
-      throw new TypeError("showLogTime must be a boolean");
-    if (typeof options.useColoredOutput !== "boolean")
-      throw new TypeError("useColoredOutput must be a boolean");
-  }
-
+  /**
+   * Logs an informational message to the console
+   * @param message The message to log
+   */
   public info(message: string) {
-    this.log("INFO", message);
-  }
-  public warn(message: string) {
-    this.log("WARN", message);
-  }
-  public error(messageOrError: unknown) {
-    this.log("ERROR", messageOrError);
-  }
-
-  private log(level: LogLevel, content: unknown) {
-    const now = new Date();
-    const isoTime = now.toISOString();
     const logParts: string[] = [];
 
     if (this._options.showLogTime) {
-      logParts.push(`[${isoTime}]`);
+      const now = new Date();
+      const timestamp = now.toISOString();
+      logParts.push(`[${timestamp}]`);
     }
 
-    const colorMap = { INFO: "\x1b[34m", WARN: "\x1b[33m", ERROR: "\x1b[31m" };
-    const levelStr = this._options.useColoredOutput
-      ? `${colorMap[level]}${level}\x1b[0m`
-      : level;
+    const level = this._options.useColoredOutput
+      ? "\x1b[34mINFO\x1b[0m"
+      : "INFO";
 
-    logParts.push(`[${levelStr}]`);
+    logParts.push(`[${level}]`);
 
-    const message =
-      level === "ERROR" ? this.extractErrorInfo(content) : String(content);
     logParts.push(message);
 
-    const fullConsoleMessage = logParts.join(" ");
-
-    // Direct to correct console stream
-    if (level === "ERROR") console.error(fullConsoleMessage);
-    else if (level === "WARN") console.warn(fullConsoleMessage);
-    else console.log(fullConsoleMessage);
+    const fullMessage = logParts.join(" ");
+    console.log(fullMessage);
 
     if (this._options.saveToLogFile) {
-      const fileTime = this._options.showLogTime ? isoTime : "";
-      this.enqueMessage(`${fileTime} ${level} ${message}`.trim());
+      this.enqueMessage(
+        this.formatMessageForLogFile(
+          "INFO",
+          message,
+          this._options.showLogTime ? new Date().toISOString() : null,
+        ),
+      );
     }
   }
 
-  private enqueMessage(message: string) {
-    if (this._messageQueue.length >= this.MAX_QUEUE_SIZE) {
-      this._messageQueue.shift();
+  /**
+   * Logs a warning message to the console
+   * @param message The message to log
+   */
+  public warn(message: string) {
+    const logParts: string[] = [];
+
+    if (this._options.showLogTime) {
+      const now = new Date();
+      const timestamp = now.toISOString();
+      logParts.push(`[${timestamp}]`);
     }
+
+    const level = this._options.useColoredOutput
+      ? "\x1b[33mWARN\x1b[0m"
+      : "WARN";
+
+    logParts.push(`[${level}]`);
+
+    logParts.push(message);
+
+    const fullMessage = logParts.join(" ");
+    console.warn(fullMessage);
+
+    if (this._options.saveToLogFile) {
+      this.enqueMessage(
+        this.formatMessageForLogFile(
+          "WARN",
+          message,
+          this._options.showLogTime ? new Date().toISOString() : null,
+        ),
+      );
+    }
+  }
+
+  /**
+   * Logs an error message to the console - pass any message but it is reccomended you pass the actual error object so we can print as much information for you.
+   *
+   * For example:
+   *
+   * ```ts
+   * logger.error(new Error(""));
+   * ```
+   * @param messageOrError The error object or message to log
+   */
+  public error(messageOrError: unknown) {
+    const logParts: string[] = [];
+
+    if (this._options.showLogTime) {
+      const now = new Date();
+      const timestamp = now.toISOString();
+      logParts.push(`[${timestamp}]`);
+    }
+
+    const level = this._options.useColoredOutput
+      ? "\x1b[31mERROR\x1b[0m"
+      : "ERROR";
+
+    logParts.push(`[${level}]`);
+
+    const errorInfo = this.extractErrorInfo(messageOrError);
+    logParts.push(errorInfo);
+
+    const fullMessage = logParts.join(" ");
+    console.error(fullMessage);
+
+    if (this._options.saveToLogFile) {
+      this.enqueMessage(
+        this.formatMessageForLogFile(
+          "ERROR",
+          errorInfo,
+          this._options.showLogTime ? new Date().toISOString() : null,
+        ),
+      );
+    }
+  }
+
+  /**
+   * Convert message to log file ready message
+   * @param level The log level for example `WARN`
+   * @param message The message
+   * @param time The iso time
+   */
+  private formatMessageForLogFile(
+    level: string,
+    message: string,
+    time: string | null = null,
+  ) {
+    return `${time} ${level} ${message}`;
+  }
+
+  /**
+   * Enques the log message to be async added to the log file
+   * @param message The message to add to the log file
+   */
+  private enqueMessage(message: string) {
     this._messageQueue.push(message);
     this.processQueue();
   }
 
+  /**
+   * Processes the message queue asynchronously
+   */
   private async processQueue() {
-    if (
-      this._isWriting ||
-      !this._todaysLogFilePath ||
-      this._messageQueue.length === 0
-    )
+    if (this._isWriting || !this._todaysLogFilePath) {
       return;
+    }
+
+    if (this._messageQueue.length === 0) {
+      return;
+    }
 
     this._isWriting = true;
+
     const messages = [...this._messageQueue];
     this._messageQueue = [];
 
     try {
-      await nodeFs.promises.appendFile(
-        this._todaysLogFilePath,
-        messages.join("\n") + "\n",
-        { encoding: "utf8" },
-      );
+      const content = messages.join("\n") + "\n";
+
+      await nodeFs.promises.appendFile(this._todaysLogFilePath, content, {
+        encoding: "utf8",
+      });
     } catch (error) {
-      console.error(`Failed to write logs: ${this.extractErrorInfo(error)}`);
+      console.error(
+        `Failed to write logs to file: ${this.extractErrorInfo(error)}`,
+      );
       this._messageQueue.unshift(...messages);
     } finally {
       this._isWriting = false;
-      if (this._messageQueue.length > 0) this.processQueue();
+
+      if (this._messageQueue.length > 0) {
+        this.processQueue();
+      }
     }
   }
 
+  /**
+   * Synchronously flushes all remaining logs in the queue to the log file
+   * Used during process exit to ensure no logs are lost
+   */
   private flushLogsSync() {
-    if (!this._todaysLogFilePath || this._messageQueue.length === 0) return;
+    if (!this._todaysLogFilePath || this._messageQueue.length === 0) {
+      return;
+    }
+
     try {
-      nodeFs.appendFileSync(
-        this._todaysLogFilePath,
-        this._messageQueue.join("\n") + "\n",
-        { encoding: "utf8" },
-      );
+      const content = this._messageQueue.join("\n") + "\n";
+      nodeFs.appendFileSync(this._todaysLogFilePath, content, {
+        encoding: "utf8",
+      });
       this._messageQueue = [];
     } catch (error) {
-      console.error(`Failed to flush logs: ${this.extractErrorInfo(error)}`);
+      console.error(
+        `Failed to flush logs on exit: ${this.extractErrorInfo(error)}`,
+      );
     }
   }
 
+  /**
+   * Runs initialization such as making log folders on start and other needed functions
+   */
   private initLogFileAndFolder() {
-    if (!nodeFs.existsSync(this._options.logFilesBasePath)) {
-      nodeFs.mkdirSync(this._options.logFilesBasePath, { recursive: true });
-    } else if (nodeFs.statSync(this._options.logFilesBasePath).isFile()) {
-      throw new Error(
-        `Path '${this._options.logFilesBasePath}' is a file, not a directory.`,
-      );
+    if (nodeFs.existsSync(this._options.logFilesBasePath)) {
+      const stats = nodeFs.statSync(this._options.logFilesBasePath);
+
+      if (stats.isFile()) {
+        throw new Error(
+          `Log files base path '${this._options.logFilesBasePath}' exists but is a file, not a directory`,
+        );
+      }
+    } else {
+      try {
+        nodeFs.mkdirSync(this._options.logFilesBasePath, { recursive: true });
+      } catch (error) {
+        throw new Error(
+          `Failed to create log directory at '${this._options.logFilesBasePath}': ${this.extractErrorInfo(error)}`,
+        );
+      }
     }
 
     this.cleanupOldLogFiles();
     this._todaysLogFilePath = this.createTodaysLogFile();
   }
 
+  /**
+   * Removes log files older than the retention period
+   */
   private cleanupOldLogFiles() {
-    const files = nodeFs.readdirSync(this._options.logFilesBasePath);
-    const now = Date.now();
-    const retentionMs =
-      this._options.logFileRetentionPeriodInDays * 24 * 60 * 60 * 1000;
-    const logFileRegex = /^(\d{4})-(\d{2})-(\d{2})\.log$/;
+    try {
+      const files = nodeFs.readdirSync(this._options.logFilesBasePath);
+      const now = new Date();
+      const retentionMs =
+        this._options.logFileRetentionPeriodInDays * 24 * 60 * 60 * 1000;
 
-    for (const file of files) {
-      const match = file.match(logFileRegex);
-      if (!match) continue;
+      for (const file of files) {
+        if (!file.endsWith(".log")) continue;
 
-      const fileDate = Date.UTC(
-        parseInt(match[1] as any, 10),
-        parseInt(match[2] as any, 10) - 1,
-        parseInt(match[3] as any, 10),
-      );
+        try {
+          const dateString = file.replace(".log", "");
+          const fileDateParts = dateString.split("-");
 
-      if (now - fileDate > retentionMs) {
-        nodeFs.unlinkSync(path.join(this._options.logFilesBasePath, file));
+          if (fileDateParts.length !== 3) {
+            console.warn(`Skipping file with invalid date format: ${file}`);
+            continue;
+          }
+
+          const year = parseInt(fileDateParts[0] as any, 10);
+          const month = parseInt(fileDateParts[1] as any, 10) - 1; // JS months are 0-indexed
+          const day = parseInt(fileDateParts[2] as any, 10);
+
+          if (isNaN(year) || isNaN(month) || isNaN(day)) {
+            console.warn(`Skipping file with invalid date values: ${file}`);
+            continue;
+          }
+
+          const fileDate = new Date(year, month, day);
+
+          if (isNaN(fileDate.getTime())) {
+            console.warn(`Skipping file with invalid date: ${file}`);
+            continue;
+          }
+
+          const fileAgeMs = now.getTime() - fileDate.getTime();
+
+          if (fileAgeMs > retentionMs) {
+            const filePath = path.join(this._options.logFilesBasePath, file);
+            nodeFs.unlinkSync(filePath);
+            console.log(
+              `Deleted old log file: ${file} (age: ${Math.floor(fileAgeMs / (24 * 60 * 60 * 1000))} days)`,
+            );
+          }
+        } catch (error) {
+          console.error(
+            `Failed to process log file ${file}: ${this.extractErrorInfo(error)}`,
+          );
+          continue;
+        }
       }
-    }
-  }
-
-  private createTodaysLogFile(): string {
-    const today = new Date();
-    const dateString = today.toISOString().split("T")[0];
-    const filePath = path.join(
-      this._options.logFilesBasePath,
-      `${dateString}.log`,
-    );
-
-    if (!nodeFs.existsSync(filePath)) {
-      nodeFs.writeFileSync(
-        filePath,
-        `=== Log created on ${dateString} (UTC) ===\n\n`,
-        { encoding: "utf8" },
+    } catch (error) {
+      console.error(
+        `Failed to cleanup old log files: ${this.extractErrorInfo(error)}`,
       );
+
+      throw error;
     }
-    return filePath;
   }
 
-  private attachProcessListeners() {
-    if (NodeLogger._listenersAttached) return;
-    NodeLogger._listenersAttached = true;
+  /**
+   * Creates today's log file if it doesn't already exist
+   * @returns The path to today's log file
+   */
+  private createTodaysLogFile(): string {
+    try {
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, "0");
+      const day = String(today.getDate()).padStart(2, "0");
 
-    const finalFlush = () => {
-      NodeLogger._instances.forEach((inst) => inst.flushLogsSync());
-    };
+      const dateString = `${year}-${month}-${day}`;
+      const fileName = `${dateString}.log`;
+      const filePath = path.join(this._options.logFilesBasePath, fileName);
 
-    process.on("exit", finalFlush);
-    process.on("SIGINT", () => {
-      finalFlush();
-      process.exit(0);
-    });
-    process.on("SIGTERM", () => {
-      finalFlush();
-      process.exit(0);
-    });
-    process.on("uncaughtException", (err) => {
-      console.error("Fatal Error:", err);
-      finalFlush();
-      process.exit(1);
-    });
+      if (nodeFs.existsSync(filePath)) {
+        const stats = nodeFs.statSync(filePath);
+
+        if (!stats.isFile()) {
+          throw new Error(
+            `Log file path '${filePath}' exists but is not a file`,
+          );
+        }
+
+        return filePath;
+      }
+
+      try {
+        const header = `=== Log file created on ${dateString} ===\n\n`;
+        nodeFs.writeFileSync(filePath, header, { encoding: "utf8" });
+
+        console.log(`Created new log file: ${fileName}`);
+        return filePath;
+      } catch (error) {
+        throw new Error(
+          `Failed to create log file at '${filePath}': ${this.extractErrorInfo(error)}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Failed to create today's log file: ${this.extractErrorInfo(error)}`,
+      );
+
+      throw error;
+    }
   }
 
+  /**
+   * Extracts as much information as possible from an error or object and returns it as a string
+   * @param error The error object or any object to extract information from
+   * @returns A detailed string representation of the error/object
+   */
   private extractErrorInfo(error: unknown): string {
+    const parts: string[] = [];
+
     if (error === null) return "null";
     if (error === undefined) return "undefined";
-    if (error instanceof Error) {
-      return `[${error.name}] ${error.message}${error.stack ? `\nStack: ${error.stack}` : ""}`;
-    }
-    if (typeof error === "object") {
-      try {
-        return JSON.stringify(error, null, 2);
-      } catch {
-        return "[Unserializable Object]";
-      }
-    }
-    return String(error);
-  }
 
-  public destroy() {
-    const index = NodeLogger._instances.indexOf(this);
-    if (index !== -1) {
-      NodeLogger._instances.splice(index, 1);
+    if (typeof error !== "object") {
+      return String(error);
+    }
+
+    if (error instanceof Error) {
+      if (error.name) parts.push(`Name: ${error.name}`);
+      if (error.message) parts.push(`Message: ${error.message}`);
+
+      if (error.stack) {
+        parts.push(`Stack: ${error.stack}`);
+      }
+
+      const nodeError = error as any;
+      if (nodeError.code) parts.push(`Code: ${nodeError.code}`);
+      if (nodeError.errno) parts.push(`Errno: ${nodeError.errno}`);
+      if (nodeError.syscall) parts.push(`Syscall: ${nodeError.syscall}`);
+      if (nodeError.path) parts.push(`Path: ${nodeError.path}`);
+      if (nodeError.port) parts.push(`Port: ${nodeError.port}`);
+      if (nodeError.address) parts.push(`Address: ${nodeError.address}`);
+      if (nodeError.dest) parts.push(`Dest: ${nodeError.dest}`);
+    }
+
+    try {
+      const obj = error as Record<string, unknown>;
+      const keys = Object.keys(obj);
+
+      for (const key of keys) {
+        if (
+          error instanceof Error &&
+          ["name", "message", "stack"].includes(key)
+        ) {
+          continue;
+        }
+
+        try {
+          const value = obj[key];
+
+          if (value === null) {
+            parts.push(`${key}: null`);
+          } else if (value === undefined) {
+            parts.push(`${key}: undefined`);
+          } else if (typeof value === "function") {
+            parts.push(`${key}: [Function]`);
+          } else if (typeof value === "object") {
+            try {
+              const stringified = JSON.stringify(value, null, 2);
+              parts.push(`${key}: ${stringified}`);
+            } catch {
+              parts.push(`${key}: [Object - could not stringify]`);
+            }
+          } else {
+            parts.push(`${key}: ${String(value)}`);
+          }
+        } catch {
+          parts.push(`${key}: [Could not access property]`);
+        }
+      }
+    } catch {}
+
+    if (parts.length > 0) {
+      return parts.join("\n");
+    }
+
+    try {
+      const obj = error as any;
+
+      if (
+        typeof obj.toString === "function" &&
+        obj.toString !== Object.prototype.toString
+      ) {
+        return obj.toString();
+      }
+
+      if (typeof obj.toJSON === "function") {
+        return JSON.stringify(obj.toJSON(), null, 2);
+      }
+
+      return JSON.stringify(error, null, 2);
+    } catch {
+      return "[Unable to extract error information]";
     }
   }
 }
 
-export = { NodeLogger };
+export = {
+  NodeLogger,
+};
