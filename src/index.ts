@@ -63,11 +63,6 @@ class NodeLogger {
   private _options: NodeLoggerOptions;
 
   /**
-   * Holds path to todays log file to append new logs to or null if they arent saving logs to files // TODO RE COMUTE EACH TIME AS 24 HOUR RUN STALE
-   */
-  private _todaysLogFilePath: string | null = null;
-
-  /**
    * Queue for log messages waiting to be written to file
    */
   private _messageQueue: string[] = [];
@@ -215,6 +210,19 @@ class NodeLogger {
   }
 
   /**
+   * Gets todays log file path - because if it runs 24 hours we need to re compute it each time
+   * to make sure we don't write to stale logs files
+   * the format is as follow base path provided then the filename is `YYYY-MM-DD`
+   */
+  private getTodaysLogFilePath(): string {
+    const date = new Date().toISOString().split("T")[0] as string;
+
+    return path.normalize(
+      path.join(this._options.logFilesBasePath, `${date}.log`),
+    );
+  }
+
+  /**
    * Enques the log message to be async added to the log file
    * @param message The message to add to the log file
    */
@@ -230,7 +238,7 @@ class NodeLogger {
    * Processes the message queue asynchronously
    */
   private async processQueue() {
-    if (this._isWriting || !this._todaysLogFilePath) {
+    if (this._isWriting) {
       return;
     }
 
@@ -246,7 +254,7 @@ class NodeLogger {
     try {
       const content = messages.join("\n") + "\n";
 
-      await nodeFs.promises.appendFile(this._todaysLogFilePath, content, {
+      await nodeFs.promises.appendFile(this.getTodaysLogFilePath(), content, {
         encoding: "utf8",
       });
     } catch (error) {
@@ -265,16 +273,16 @@ class NodeLogger {
 
   /**
    * Synchronously flushes all remaining logs in the queue to the log file
-   * Used during process exit to ensure no logs are lost
+   * Used during process exit to ensure no logs are lost, use this when your process is going to exit
    */
   public flushLogsSync() {
-    if (!this._todaysLogFilePath || this._messageQueue.length === 0) {
+    if (this._messageQueue.length === 0) {
       return;
     }
 
     try {
       const content = this._messageQueue.join("\n") + "\n";
-      nodeFs.appendFileSync(this._todaysLogFilePath, content, {
+      nodeFs.appendFileSync(this.getTodaysLogFilePath(), content, {
         encoding: "utf8",
       });
       this._messageQueue = [];
