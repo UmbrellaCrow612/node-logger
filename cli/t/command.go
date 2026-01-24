@@ -4,7 +4,7 @@ package t
 type Action func(options *ArgOptions, line string) error
 
 type CommandAndAction struct {
-	// Whats need at the prefix of the message for it to match
+	// Whats need at the prefix of the message for it to match for example write: or exit etc
 	PrefixMatcher string
 
 	// THe specific logic to run

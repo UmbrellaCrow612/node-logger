@@ -36,8 +36,6 @@ var CommandActions = []t.CommandAndAction{
 			if _, err := file.WriteString(strings.TrimPrefix(line, "write:") + "\n"); err != nil {
 				return err
 			}
-
-			console.Info("Writing:", line)
 			return nil
 		},
 	},

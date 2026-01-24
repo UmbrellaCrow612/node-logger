@@ -16,11 +16,6 @@ func GetTodaysLogFile(options *t.ArgOptions) (string, error) {
 	fileName := today + ".log"
 	filePath := filepath.Join(*options.BasePath, fileName)
 
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
-	}
-
 	_, err := os.Stat(filePath)
 	if errors.Is(err, os.ErrNotExist) {
 		_, err := os.Create(filePath)
