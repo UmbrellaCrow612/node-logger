@@ -1,24 +1,13 @@
-import nodeFs = require("node:fs");
+import child_process = require("node:child_process");
 import path = require("node:path");
 
 /**
  * Holds default options for the logger
  */
 const defaultOptions: NodeLoggerOptions = {
-  logFileRetentionPeriodInDays: 30,
   logFilesBasePath: "./logs",
   saveToLogFile: true,
   showLogTime: true,
-  useColoredOutput: true,
-};
-
-/**
- * Holds specific log levels and their colors to be printed in
- */
-const colorMap: Record<LogLevel, string> = {
-  INFO: "\x1b[34m",
-  WARN: "\x1b[33m",
-  ERROR: "\x1b[31m",
 };
 
 /**
@@ -31,11 +20,6 @@ type LogLevel = "WARN" | "INFO" | "ERROR";
  */
 type NodeLoggerOptions = {
   /**
-   * Indicates if output produced specifically to the stdout console should be colored (defaults to `true`)
-   */
-  useColoredOutput: boolean;
-
-  /**
    * Indicates if stdout console output produced by this logger should be saved to log files (defaults to `true`)
    */
   saveToLogFile: boolean;
@@ -44,11 +28,6 @@ type NodeLoggerOptions = {
    * The base path / path to the folder to save the log outputs to (defaults to `./logs`) then is converted to an absolute path internally
    */
   logFilesBasePath: string;
-
-  /**
-   * Indicates how long old log files should be kept (defaults to `30` days)
-   */
-  logFileRetentionPeriodInDays: number;
 
   /**
    * Indicates if it should add the time of when the log was made for a given log item (defaults to `true`)
@@ -69,25 +48,14 @@ class NodeLogger {
   private _options: NodeLoggerOptions;
 
   /**
-   * Queue for log messages waiting to be written to file
+   * Holds ref to the go binary that we write to the stdin of
    */
-  private _messageQueue: string[] = [];
+  private _spawnRef: child_process.ChildProcessWithoutNullStreams | null = null;
 
   /**
-   * How many messages we can hold before we start dropping old ones if we cannot write to log file
+   * Refrence to the bhinary it spawns
    */
-  private _maxQueueMessages = 500;
-
-  /**
-   * Indicates if a write operation is currently in progress
-   */
-  private _isWriting: boolean = false;
-
-  /**
-   * Indicates when the last clean happened; should be every 24 hours.
-   * Holds a UTC string of when it last happened.
-   */
-  private _lastCleanedOldLogsUtc: string | null = null;
+  private readonly goBinaryPath = path.join(__dirname, "cli.exe");
 
   /**
    * Pass additional options on initialization to change the logger's behaviour
@@ -99,16 +67,6 @@ class NodeLogger {
     if (typeof this._options !== "object") {
       throw new TypeError(
         "Options passed cannot be null or undefined; it must be an object",
-      );
-    }
-
-    if (
-      typeof this._options.logFileRetentionPeriodInDays !== "number" ||
-      (typeof this._options.logFileRetentionPeriodInDays === "number" &&
-        this._options.logFileRetentionPeriodInDays <= 0)
-    ) {
-      throw new TypeError(
-        "logFileRetentionPeriodInDays must be a number and greater than 0",
       );
     }
 
@@ -128,25 +86,11 @@ class NodeLogger {
       throw new TypeError("showLogTime must be a boolean");
     }
 
-    if (typeof this._options.useColoredOutput !== "boolean") {
-      throw new TypeError("useColoredOutput must be a boolean");
+    if (options.saveToLogFile) {
+      this._spawnRef = child_process.spawn(this.goBinaryPath, [
+        `-base=${this._options.logFilesBasePath}`,
+      ]);
     }
-  }
-
-  /**
-   * Checks if 24 hours have passed since the last log cleanup.
-   */
-  private shouldCleanOldLogs(): boolean {
-    if (!this._lastCleanedOldLogsUtc) {
-      return true;
-    }
-
-    const lastCleaned = new Date(this._lastCleanedOldLogsUtc).getTime();
-    const now = new Date().getTime();
-
-    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-
-    return now - lastCleaned >= TWENTY_FOUR_HOURS_MS;
   }
 
   /**
@@ -164,9 +108,7 @@ class NodeLogger {
       logParts.push(`[${timestamp}]`);
     }
 
-    const levelStr = this._options.useColoredOutput
-      ? `${colorMap[level]}${level}\x1b[0m`
-      : level;
+    const levelStr = level;
 
     logParts.push(`[${levelStr}]`);
 
@@ -183,13 +125,8 @@ class NodeLogger {
     else console.log(fullConsoleMessage);
 
     if (this._options.saveToLogFile) {
-      if (this.shouldCleanOldLogs()) {
-        this.cleanupOldLogFiles();
-        this._lastCleanedOldLogsUtc = new Date().toUTCString();
-      }
-
       const fileTime = this._options.showLogTime ? now.toUTCString() : "";
-      this.enqueMessage(`${fileTime} ${level} ${message}`.trim());
+      this.writeToStdin(`write:${fileTime} ${level} ${message}\n`);
     }
   }
 
@@ -228,106 +165,26 @@ class NodeLogger {
   }
 
   /**
-   * Gets today's log file path.
-   * Because if it runs for 24 hours we need to recompute it each time
-   * to make sure we don't write to stale log files.
-   * The format is as follows: base path provided, then the filename is `YYYY-MM-DD`
+   * Runs cleanup logic
    */
-  private getTodaysLogFilePath(): string {
-    const date = new Date().toISOString().split("T")[0] as string;
-
-    return path.normalize(
-      path.join(this._options.logFilesBasePath, `${date}.log`),
-    );
+  public flush() {
+    this.writeToStdin(`exit\n`)
   }
 
   /**
-   * Enqueues the log message to be asynchronously added to the log file
-   * @param message The message to add to the log file
+   * Writes the log message to the stdin of the spawned process
+   * @param command The message to add to the log file
    */
-  private enqueMessage(message: string) {
-    if (this._messageQueue.length >= this._maxQueueMessages) {
-      this._messageQueue.shift();
-    }
-    this._messageQueue.push(message);
-    this.processQueue();
-  }
-
-  /**
-   * Processes the message queue asynchronously
-   */
-  private async processQueue() {
-    if (this._isWriting) return;
-    this._isWriting = true;
-
-    while (this._messageQueue.length > 0) {
-      const messages = this._messageQueue.splice(0);
-      try {
-        const content = messages.join("\n") + "\n";
-        await nodeFs.promises.appendFile(this.getTodaysLogFilePath(), content, {
-          encoding: "utf8",
-        });
-      } catch (error) {
-        console.error(
-          `Failed to write logs to file: ${this.extractErrorInfo(error)}`,
-        );
-        this._messageQueue.unshift(...messages);
-        break;
-      }
+  private writeToStdin(command: string) {
+    if (typeof command !== "string") {
+      throw new TypeError("command must be a string");
     }
 
-    this._isWriting = false;
-  }
-
-  /**
-   * Synchronously flushes all remaining logs in the queue to the log file.
-   * Used during process exit to ensure no logs are lost.
-   */
-  public flushLogsSync() {
-    if (this._messageQueue.length === 0) {
-      return;
+    if (!this._spawnRef || !this._spawnRef.stdin.writable) {
+      throw new Error("Cannot write to stdin");
     }
 
-    try {
-      const content = this._messageQueue.join("\n") + "\n";
-      nodeFs.appendFileSync(this.getTodaysLogFilePath(), content, {
-        encoding: "utf8",
-      });
-      this._messageQueue = [];
-    } catch (error) {
-      console.error(
-        `Failed to flush logs on exit: ${this.extractErrorInfo(error)}`,
-      );
-    }
-  }
-
-  /**
-   * Removes log files older than the retention period
-   */
-  private cleanupOldLogFiles() {
-    try {
-      const files = nodeFs.readdirSync(this._options.logFilesBasePath);
-      const now = new Date();
-      const retentionMs =
-        this._options.logFileRetentionPeriodInDays * 24 * 60 * 60 * 1000;
-
-      for (const file of files) {
-        if (!file.endsWith(".log")) continue;
-
-        const dateString = file.replace(".log", "");
-        const fileDate = new Date(`${dateString}T00:00:00Z`);
-
-        if (isNaN(fileDate.getTime())) continue;
-
-        const fileAgeMs = now.getTime() - fileDate.getTime();
-
-        if (fileAgeMs > retentionMs) {
-          nodeFs.unlinkSync(path.join(this._options.logFilesBasePath, file));
-        }
-      }
-    } catch (error) {
-      console.error(`Cleanup failed: ${this.extractErrorInfo(error)}`);
-    }
+    this._spawnRef.stdin.write(command);
   }
 
   /**
