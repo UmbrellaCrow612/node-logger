@@ -46,5 +46,24 @@ func validateArgsOptions(options *t.ArgOptions) error {
 	}
 	options.BasePath = &abs
 
+	_, err = os.Stat(abs)
+	if errors.Is(err, os.ErrNotExist) {
+		err := os.MkdirAll(abs, os.ModeAppend)
+		if err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	info, err := os.Stat(abs)
+	if err != nil {
+		return err
+	}
+
+	if !info.IsDir() {
+		return errors.New("base path cannot be a path to a file " + abs)
+	}
+
 	return nil
 }
