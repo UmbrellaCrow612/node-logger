@@ -15,8 +15,12 @@ var (
 	logWriter   *os.File
 	once        sync.Once
 	onceMu      sync.Mutex
+
+	logChan  chan string
+	stopChan chan struct{}
 )
 
+// initLogWriter opens the log file and starts the background writer goroutine
 func initLogWriter(options *t.ArgOptions) {
 	fp, err := logfiles.GetTodaysLogFile(options)
 	if err != nil {
@@ -30,12 +34,49 @@ func initLogWriter(options *t.ArgOptions) {
 
 	logFilePath = fp
 	logWriter = file
+
+	// recreate channels on init
+	logChan = make(chan string, 1000)
+	stopChan = make(chan struct{})
+
+	go backgroundWriter()
 }
 
+// backgroundWriter consumes messages from the channel and writes to disk
+func backgroundWriter() {
+	for {
+		select {
+		case msg := <-logChan:
+			_, _ = logWriter.WriteString(msg + "\n")
+		case <-stopChan:
+			return
+		}
+	}
+}
+
+// resetInit resets the once guard so initLogWriter can be called again
 func resetInit() {
 	onceMu.Lock()
 	defer onceMu.Unlock()
 	once = sync.Once{}
+}
+
+// enqueueLog sends message to the channel
+func enqueueLog(msg string) {
+	logChan <- msg
+}
+
+// closeLogger closes writer and stops goroutine
+func closeLogger() {
+	if stopChan != nil {
+		close(stopChan)
+		stopChan = nil
+	}
+
+	if logWriter != nil {
+		_ = logWriter.Close()
+		logWriter = nil
+	}
 }
 
 var CommandActions = []t.CommandAndAction{
@@ -43,11 +84,7 @@ var CommandActions = []t.CommandAndAction{
 		PrefixMatcher: "exit",
 		Action: func(options *t.ArgOptions, line string) error {
 			console.Info("Exiting...")
-
-			if logWriter != nil {
-				_ = logWriter.Close()
-			}
-
+			closeLogger()
 			os.Exit(0)
 			return nil
 		},
@@ -55,13 +92,8 @@ var CommandActions = []t.CommandAndAction{
 	{
 		PrefixMatcher: "reload",
 		Action: func(options *t.ArgOptions, line string) error {
-			console.Info("Reloading log writer...")
-
-			if logWriter != nil {
-				_ = logWriter.Close()
-				logWriter = nil
-			}
-
+			console.Info("Reloading logger...")
+			closeLogger()
 			resetInit()
 			return nil
 		},
@@ -77,10 +109,7 @@ var CommandActions = []t.CommandAndAction{
 				return nil
 			}
 
-			if _, err := logWriter.WriteString(strings.TrimPrefix(line, "write:") + "\n"); err != nil {
-				return err
-			}
-
+			enqueueLog(strings.TrimPrefix(line, "write:"))
 			return nil
 		},
 	},
