@@ -1,38 +1,15 @@
 import child_process = require("node:child_process");
 import path = require("node:path");
+import fs = require("fs");
+import type types = require("./types");
 
 /**
  * Holds default options for the logger
  */
-const defaultOptions: NodeLoggerOptions = {
+const defaultOptions: types.NodeLoggerOptions = {
   logFilesBasePath: "./logs",
   saveToLogFile: true,
   showLogTime: true,
-};
-
-/**
- * Indicates which level of log should be used
- */
-type LogLevel = "WARN" | "INFO" | "ERROR";
-
-/**
- * List of options you can pass to change the logger behaviour
- */
-type NodeLoggerOptions = {
-  /**
-   * Indicates if stdout console output produced by this logger should be saved to log files (defaults to `true`)
-   */
-  saveToLogFile: boolean;
-
-  /**
-   * The base path / path to the folder to save the log outputs to (defaults to `./logs`) then is converted to an absolute path internally
-   */
-  logFilesBasePath: string;
-
-  /**
-   * Indicates if it should add the time of when the log was made for a given log item (defaults to `true`)
-   */
-  showLogTime: boolean;
 };
 
 /**
@@ -45,7 +22,7 @@ class NodeLogger {
   /**
    * Holds the options passed to the logger
    */
-  private _options: NodeLoggerOptions;
+  private _options: types.NodeLoggerOptions;
 
   /**
    * Holds ref to the go binary that we write to the stdin of
@@ -53,18 +30,10 @@ class NodeLogger {
   private _spawnRef: child_process.ChildProcessWithoutNullStreams | null = null;
 
   /**
-   * Refrence to the bhinary it spawns
-   */
-  private readonly goBinaryPath = path.join(
-    __dirname,
-    `binary-${process.platform}-${process.arch}${process.platform === "win32" ? ".exe" : ""}`,
-  );
-
-  /**
    * Pass additional options on initialization to change the logger's behaviour
    * @param options Change the behaviour of the logger
    */
-  constructor(options: Partial<NodeLoggerOptions> = defaultOptions) {
+  constructor(options: Partial<types.NodeLoggerOptions> = defaultOptions) {
     this._options = { ...defaultOptions, ...options };
 
     if (typeof this._options !== "object") {
@@ -89,10 +58,46 @@ class NodeLogger {
       throw new TypeError("showLogTime must be a boolean");
     }
 
+    this._options.logFilesBasePath = path.resolve(this._options.logFilesBasePath)
+
     if (options.saveToLogFile) {
-      this._spawnRef = child_process.spawn(this.goBinaryPath, [
-        `-base=${this._options.logFilesBasePath}`,
-      ]);
+      let process_path = this.findNodeProcessFile();
+      if (!process_path) {
+        throw new Error("Failed ot find node_process file");
+      }
+
+      this._spawnRef = child_process.spawn("node", [process_path, `--basePath=${this._options.logFilesBasePath}`]); // we are spawing a js file so we use node
+
+      this._spawnRef.stdout.on("data", (data) => {
+        console.log("spawned process data");
+        console.log(data.toString());
+      });
+
+      this._spawnRef.stderr.on("data", (data) => {
+        console.error("spawned process errored");
+        console.error(data.toString());
+      });
+
+      this._spawnRef.on("exit", (code) => {
+        console.error("spawn proces exited");
+        console.error(this.extractErrorInfo(code));
+      });
+    }
+  }
+
+  /**
+   * Trys to find the `node_process` file which spawn the protcol handler
+   * @returns The path to the file or undefined
+   */
+  private findNodeProcessFile() {
+    try {
+      const files = fs.readdirSync(__dirname);
+
+      const match = files.find((file) => file === "node_process.js");
+
+      return match ? path.join(__dirname, match) : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -102,7 +107,7 @@ class NodeLogger {
    * @param content A message or error object or object
    * @param contents Any other messages or error objects
    */
-  private log(level: LogLevel, content: unknown, ...contents: unknown[]) {
+  private log(level: types.LogLevel, content: unknown, ...contents: unknown[]) {
     const now = new Date();
     const logParts: string[] = [];
 
@@ -111,9 +116,7 @@ class NodeLogger {
       logParts.push(`[${timestamp}]`);
     }
 
-    const levelStr = level;
-
-    logParts.push(`[${levelStr}]`);
+    logParts.push(`[${level}]`);
 
     let message = `${this.extractErrorInfo(content)}`;
     contents.forEach((m) => {
@@ -129,8 +132,11 @@ class NodeLogger {
 
     if (this._options.saveToLogFile) {
       const fileTime = this._options.showLogTime ? now.toUTCString() : "";
-      console.log(`write:${fileTime} ${level} ${message}\n`)
-      this.writeToStdin(`write:${fileTime} ${level} ${message}\n`);
+      const data = `${fileTime} ${level} ${message}\n`;
+      this.writeToStdin({
+        method: "log",
+        body: data,
+      });
     }
   }
 
@@ -169,26 +175,27 @@ class NodeLogger {
   }
 
   /**
-   * Runs cleanup logic
-   */
-  public flush() {
-    this.writeToStdin(`exit\n`);
-  }
-
-  /**
    * Writes the log message to the stdin of the spawned process
-   * @param command The message to add to the log file
+   * @param request
    */
-  private writeToStdin(command: string) {
-    if (typeof command !== "string") {
-      throw new TypeError("command must be a string");
+  private writeToStdin(request: types.NodeProcessRequest) {
+    if (typeof request !== "object") {
+      throw new TypeError("request must be a object");
     }
 
     if (!this._spawnRef || !this._spawnRef.stdin.writable) {
       throw new Error("Cannot write to stdin");
     }
 
-    this._spawnRef.stdin.write(command);
+    try {
+      this._spawnRef.stdin.write(""); // TODO
+    } catch (error) {
+      console.error("Failed to write to node_process");
+      console.error(this.extractErrorInfo(error));
+      this._spawnRef.kill();
+
+      throw error;
+    }
   }
 
   /**
