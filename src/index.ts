@@ -58,7 +58,9 @@ class NodeLogger {
       throw new TypeError("showLogTime must be a boolean");
     }
 
-    this._options.logFilesBasePath = path.resolve(this._options.logFilesBasePath)
+    this._options.logFilesBasePath = path.resolve(
+      this._options.logFilesBasePath,
+    );
 
     if (options.saveToLogFile) {
       let process_path = this.findNodeProcessFile();
@@ -66,7 +68,10 @@ class NodeLogger {
         throw new Error("Failed ot find node_process file");
       }
 
-      this._spawnRef = child_process.spawn("node", [process_path, `--basePath=${this._options.logFilesBasePath}`]); // we are spawing a js file so we use node
+      this._spawnRef = child_process.spawn("node", [
+        process_path,
+        `--basePath=${this._options.logFilesBasePath}`,
+      ]); // we are spawing a js file so we use node
 
       this._spawnRef.stdout.on("data", (data) => {
         console.log("spawned process data");
@@ -172,6 +177,15 @@ class NodeLogger {
    */
   public error(messageOrError: unknown, ...messages: unknown[]) {
     this.log("ERROR", messageOrError, ...messages);
+  }
+
+  /**
+   * Used to write any remaning logs to the log file if defined - call at the end of program being close / exited to save any logs
+   */
+  public Flush() {
+    // TODO - write to stdin / request style
+    this._spawnRef?.kill()
+    console.log("killed")
   }
 
   /**
