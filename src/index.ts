@@ -55,7 +55,10 @@ class NodeLogger {
   /**
    * Refrence to the bhinary it spawns
    */
-  private readonly goBinaryPath = path.join(__dirname, "cli.exe");
+  private readonly goBinaryPath = path.join(
+    __dirname,
+    `binary-${process.platform}-${process.arch}${process.platform === "win32" ? ".exe" : ""}`,
+  );
 
   /**
    * Pass additional options on initialization to change the logger's behaviour
@@ -168,7 +171,7 @@ class NodeLogger {
    * Runs cleanup logic
    */
   public flush() {
-    this.writeToStdin(`exit\n`)
+    this.writeToStdin(`exit\n`);
   }
 
   /**
