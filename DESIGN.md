@@ -1,17 +1,17 @@
 # Design
 
 - Spawn logger class
-- Interally it spawns `node_process.ts` file which handles the stdin log writing to a file using JSON rpc protocol, basicallyt we write to this then it writes the stuff to a log file
+- Interally it spawns `node_process.ts` file which handles the stdin log writing to a file using JSON rpc protocol, basically we write to this then it writes the stuff to a log file
+in a serpate process to not block the main loop
 
 Protocol for `node_process`
 
 ```bash
-Content-Length: 1234/r/n
-/r/n
-JSON-String-Content
+Content-Length: 1234/r/n/r/n
+{JSON-String-Content}
 ```
 
-Sinilar ot LSP json rpc protocol but we have custom json mesages
+Similar to LSP json rpc protocol but we have custom json mesages
 
 # Requests 
 

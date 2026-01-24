@@ -76,21 +76,6 @@ class NodeLogger {
         `--basePath=${this._options.logFilesBasePath}`,
       ]); // we are spawing a js file so we use node
 
-      this._spawnRef.stdout.on("data", (data) => {
-        console.log("spawned process data");
-        console.log(data.toString());
-      });
-
-      this._spawnRef.stderr.on("data", (data) => {
-        console.error("spawned process errored");
-        console.error(data.toString());
-      });
-
-      this._spawnRef.on("exit", (code) => {
-        console.error("spawn proces exited");
-        console.error(this.extractErrorInfo(code));
-      });
-
       process.on("beforeExit", () => {
         this.flush();
       });
