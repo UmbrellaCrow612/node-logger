@@ -48,7 +48,7 @@ func validateArgsOptions(options *t.ArgOptions) error {
 
 	_, err = os.Stat(abs)
 	if errors.Is(err, os.ErrNotExist) {
-		err := os.MkdirAll(abs, os.ModeAppend)
+		err := os.MkdirAll(abs, 0700)
 		if err != nil {
 			return err
 		}
