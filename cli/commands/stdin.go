@@ -14,6 +14,7 @@ var (
 	logFilePath string
 	logWriter   *os.File
 	once        sync.Once
+	onceMu      sync.Mutex
 )
 
 func initLogWriter(options *t.ArgOptions) {
@@ -31,6 +32,12 @@ func initLogWriter(options *t.ArgOptions) {
 	logWriter = file
 }
 
+func resetInit() {
+	onceMu.Lock()
+	defer onceMu.Unlock()
+	once = sync.Once{}
+}
+
 var CommandActions = []t.CommandAndAction{
 	{
 		PrefixMatcher: "exit",
@@ -46,11 +53,24 @@ var CommandActions = []t.CommandAndAction{
 		},
 	},
 	{
+		PrefixMatcher: "reload",
+		Action: func(options *t.ArgOptions, line string) error {
+			console.Info("Reloading log writer...")
+
+			if logWriter != nil {
+				_ = logWriter.Close()
+				logWriter = nil
+			}
+
+			resetInit()
+			return nil
+		},
+	},
+	{
 		PrefixMatcher: "write:",
 		Action: func(options *t.ArgOptions, line string) error {
 			once.Do(func() {
 				initLogWriter(options)
-				console.Info("Once")
 			})
 
 			if logWriter == nil {
