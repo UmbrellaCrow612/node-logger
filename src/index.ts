@@ -131,36 +131,6 @@ class NodeLogger {
     if (typeof this._options.useColoredOutput !== "boolean") {
       throw new TypeError("useColoredOutput must be a boolean");
     }
-
-    this._options.logFilesBasePath = path.resolve(
-      this._options.logFilesBasePath,
-    );
-
-    try {
-      if (
-        this._options.saveToLogFile &&
-        !nodeFs.existsSync(this._options.logFilesBasePath)
-      ) {
-        nodeFs.mkdirSync(this._options.logFilesBasePath, { recursive: true });
-      }
-    } catch (error) {
-      throw new Error(
-        `Could not create log directory: ${this.extractErrorInfo(error)}`,
-      );
-    }
-
-    try {
-      if (this._options.saveToLogFile) {
-        this.cleanupOldLogFiles();
-        this._lastCleanedOldLogsUtc = new Date().toUTCString();
-      }
-    } catch (error) {
-      console.error(
-        `Failed to initialize logger error: ${this.extractErrorInfo(error)}`,
-      );
-
-      throw error;
-    }
   }
 
   /**

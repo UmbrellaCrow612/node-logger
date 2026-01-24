@@ -13,7 +13,6 @@ import (
 func Parse() (*t.ArgOptions, error) {
 	flagSet := flag.NewFlagSet("node-logger-go", flag.ExitOnError)
 
-	logFileRetentionPeriodInDays := flagSet.Int("period", 30, "How long log files will be retained for a period of x number of days (defaults to 30 days)")
 	logFilesBasePath := flagSet.String("base", "./logs", "The base path where the logs will be wrote to pass it as a relative path (defaults to ./logs folder)")
 
 	err := flagSet.Parse(os.Args[1:])
@@ -21,7 +20,7 @@ func Parse() (*t.ArgOptions, error) {
 		return nil, err
 	}
 
-	options := &t.ArgOptions{RetentionPeriod: logFileRetentionPeriodInDays, BasePath: logFilesBasePath}
+	options := &t.ArgOptions{BasePath: logFilesBasePath}
 	err = validateArgsOptions(options)
 	if err != nil {
 		return nil, err
@@ -32,10 +31,6 @@ func Parse() (*t.ArgOptions, error) {
 
 // Validates the options passed ot the cli
 func validateArgsOptions(options *t.ArgOptions) error {
-	if *options.RetentionPeriod <= 0 {
-		return errors.New("Retention period cannot be a below or euqal to 0")
-	}
-
 	if *options.BasePath == "" {
 		return errors.New("Base path cannot be a empty string")
 	}

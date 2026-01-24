@@ -17,7 +17,6 @@ var CommandActions = []t.CommandAndAction{
 			return nil
 		},
 	},
-	// write content from stdin to the log file
 	{
 		PrefixMatcher: "write:",
 		Action: func(options *t.ArgOptions, line string) error {
