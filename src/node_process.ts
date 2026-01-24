@@ -1,9 +1,3 @@
-/**
- * Self contained process that handles the protcol defined in the DESIGN.md file - basically handles writes to the stdin, process them, then write them to a log file
- *
- * This is spawned as child process so write it like a script
- */
-
 import type types = require("./types");
 import fs = require("fs");
 import path = require("path");
@@ -20,6 +14,11 @@ const options: types.NodeProcessOptions = {
   basePath: "",
   startedUtc: new Date().toUTCString(),
 };
+
+/**
+ * Buffer for stdin data
+ */
+let buffer = "";
 
 /**
  * Loops through args and looks for flags and extracts and sets there values
@@ -60,12 +59,115 @@ function createBasePath() {
 }
 
 /**
- * Gets todays lof file path in format YYYY-MM-DD and returns a string for example `c:/dev/logs/2026-01.23.log`
+ * Gets todays log file path in format YYYY-MM-DD and returns a string for example `c:/dev/logs/2026-01.23.log`
  */
-function getTodaysLogFile(options: types.NodeProcessOptions): string {
+function getTodaysLogFile(): string {
   const today = new Date().toISOString().split("T")[0];
-  const filePath = path.join(options.basePath, `${today}.log`);
-  return filePath;
+  return path.join(options.basePath, `${today}.log`);
+}
+
+/**
+ * Send response back to stdout
+ */
+function sendResponse(response: types.NodeProcessResponse) {
+  const json = JSON.stringify(response);
+  const header = `Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n`;
+  process.stdout.write(header + json);
+}
+
+/**
+ * Handle a request
+ */
+function handleRequest(req: types.NodeProcessRequest) {
+  try {
+    if (!req || typeof req !== "object")
+      throw new Error("Invalid request object");
+
+    const { id, method, data } = req;
+
+    if (typeof id !== "number") throw new Error("Invalid or missing id");
+    if (typeof method !== "string")
+      throw new Error("Invalid or missing method");
+
+    if (method === "log") {
+      const logText = String(data);
+
+      fs.appendFileSync(getTodaysLogFile(), logText + "\n");
+
+      sendResponse({
+        id,
+        method,
+        success: true,
+        error: null,
+        message: "logged",
+      });
+    } else if (method === "reload") {
+      sendResponse({
+        id,
+        method,
+        success: true,
+        error: null,
+        message: "reloaded",
+      });
+    } else if (method === "flush") {
+      sendResponse({
+        id,
+        method,
+        success: true,
+        error: null,
+        message: "flushed",
+      });
+      process.exit(0);
+    } else {
+      throw new Error("Unknown method: " + method);
+    }
+  } catch (err) {
+    sendResponse({
+      id: (req as any)?.id ?? -1,
+      method: (req as any)?.method ?? "unknown",
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+      message: null,
+    });
+
+    process.exit(1);
+  }
+}
+
+/**
+ * Parses the buffer for complete messages
+ */
+function parseBuffer() {
+  while (true) {
+    const headerEnd = buffer.indexOf("\r\n\r\n");
+    if (headerEnd === -1) return; // incomplete header
+
+    const header = buffer.slice(0, headerEnd);
+    const match = header.match(/Content-Length:\s*(\d+)/i);
+
+    if (!match) {
+      console.error("Malformed header: missing Content-Length");
+      process.exit(1);
+    }
+
+    const contentLength = parseInt(match[1] as any, 10);
+    const bodyStart = headerEnd + 4;
+
+    if (buffer.length < bodyStart + contentLength) return; // incomplete body
+
+    const body = buffer.slice(bodyStart, bodyStart + contentLength);
+    buffer = buffer.slice(bodyStart + contentLength); // consume
+
+    let request: types.NodeProcessRequest;
+    try {
+      request = JSON.parse(body);
+    } catch {
+      console.error("Malformed JSON body");
+      process.exit(1);
+    }
+
+    handleRequest(request);
+  }
 }
 
 /**
@@ -74,17 +176,16 @@ function getTodaysLogFile(options: types.NodeProcessOptions): string {
 async function main() {
   setOptionValues();
   validateOptions();
-  createBasePath()
+  createBasePath();
 
+  process.stdin.on("data", (chunk) => {
+    buffer += chunk;
+    parseBuffer();
+  });
 
-  console.log("Todays log file " + getTodaysLogFile(options));
-
-  /**
-   * Holds the stdin buffer i.e content written to the process
-   */
-  // const buffer = Buffer.alloc(0)
-
-  process.exit();
+  process.stdin.on("end", () => {
+    process.exit(0);
+  });
 }
 
 main();

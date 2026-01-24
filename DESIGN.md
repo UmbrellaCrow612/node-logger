@@ -51,6 +51,10 @@ Write a log message to a log file
 
 Trys to switch to a new day file file and write to that
 
+- flush
+
+Final exit style command that writes any remaning logs then exists the process
+
 
 # Writing / testing 
 

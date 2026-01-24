@@ -1,14 +1,26 @@
 /**
  * List of methods / actions that the node_process can perform
  */
-export type RequestMethod = "log" | "reload";
+export type RequestMethod = "log" | "reload" | "flush";
 
 /**
  * Represents the shape of data sent to the node_process
  */
 export type NodeProcessRequest = {
+  id: number;
   method: RequestMethod;
-  body: any;
+  data: any;
+};
+
+/**
+ * Response shape
+ */
+export type NodeProcessResponse = {
+  id: number;
+  method: RequestMethod;
+  success: boolean;
+  error: any;
+  message: any;
 };
 
 /**

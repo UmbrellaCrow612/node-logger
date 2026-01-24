@@ -14,9 +14,7 @@ const defaultOptions: types.NodeLoggerOptions = {
 
 /**
  * Represents a logger used to log to node's stdout console and also save logs to log files.
- * Uses some blocking at the beginning if you want to save output to log files
- * as it has to ensure it makes the folder and file.
- * Logs themselves are asynchronously added in a queue system then added to log files.
+ * Uses a seperate process that writes to log file while the main logger in your application process is non blocking
  */
 class NodeLogger {
   /**
@@ -28,6 +26,11 @@ class NodeLogger {
    * Holds ref to the go binary that we write to the stdin of
    */
   private _spawnRef: child_process.ChildProcessWithoutNullStreams | null = null;
+
+  /**
+   * Indicates if flush has been sent
+   */
+  private _isFlushing = false;
 
   /**
    * Pass additional options on initialization to change the logger's behaviour
@@ -87,6 +90,22 @@ class NodeLogger {
         console.error("spawn proces exited");
         console.error(this.extractErrorInfo(code));
       });
+
+      process.on("beforeExit", () => {
+        this.flush();
+      });
+
+      process.on("SIGINT", () => {
+        this.flush();
+      });
+
+      process.on("SIGTERM", () => {
+        this.flush();
+      });
+
+      process.on("uncaughtException", () => {
+        this.flush();
+      });
     }
   }
 
@@ -137,10 +156,11 @@ class NodeLogger {
 
     if (this._options.saveToLogFile) {
       const fileTime = this._options.showLogTime ? now.toUTCString() : "";
-      const data = `${fileTime} ${level} ${message}\n`;
+      const data = `${fileTime} ${level} ${message}`;
       this.writeToStdin({
         method: "log",
-        body: data,
+        data,
+        id: 1,
       });
     }
   }
@@ -180,34 +200,44 @@ class NodeLogger {
   }
 
   /**
-   * Used to write any remaning logs to the log file if defined - call at the end of program being close / exited to save any logs
+   * Used to write any remaning logs to the stdin and close the sidecar logger - NEEDS to be called on app exit or on app cleanup
    */
-  public Flush() {
-    // TODO - write to stdin / request style
-    this._spawnRef?.kill()
-    console.log("killed")
+  public flush() {
+    if(this._isFlushing) return;
+    this._isFlushing = true
+
+    this.writeToStdin({
+      id: 1,
+      method: "flush",
+      data: null,
+    });
+
+    console.log("flush ran");
   }
 
   /**
-   * Writes the log message to the stdin of the spawned process
-   * @param request
+   * Write to the stdin of the process in the protocol defined
+   * @param request The request payload
    */
   private writeToStdin(request: types.NodeProcessRequest) {
-    if (typeof request !== "object") {
-      throw new TypeError("request must be a object");
+    if (typeof request !== "object" || request === null) {
+      throw new TypeError("request must be an object");
     }
 
     if (!this._spawnRef || !this._spawnRef.stdin.writable) {
       throw new Error("Cannot write to stdin");
     }
 
+    const json = JSON.stringify(request);
+    const header = `Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n`;
+    const payload = header + json;
+
     try {
-      this._spawnRef.stdin.write(""); // TODO
+      this._spawnRef.stdin.write(payload);
     } catch (error) {
       console.error("Failed to write to node_process");
       console.error(this.extractErrorInfo(error));
       this._spawnRef.kill();
-
       throw error;
     }
   }
