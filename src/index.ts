@@ -129,6 +129,7 @@ class NodeLogger {
 
     if (this._options.saveToLogFile) {
       const fileTime = this._options.showLogTime ? now.toUTCString() : "";
+      console.log(`write:${fileTime} ${level} ${message}\n`)
       this.writeToStdin(`write:${fileTime} ${level} ${message}\n`);
     }
   }

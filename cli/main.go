@@ -1,39 +1,25 @@
 package main
 
 import (
-	"bufio"
+	"fmt"
 	"os"
-	"strings"
 
 	"github.com/UmbrellaCrow612/node-logger/cli/arguments"
-	"github.com/UmbrellaCrow612/node-logger/cli/commands"
-	"github.com/UmbrellaCrow612/node-logger/cli/console"
+	"github.com/UmbrellaCrow612/node-logger/cli/protocol"
 )
 
 // Main entry point
 func main() {
-	options, err := arguments.Parse()
+	_, err := arguments.Parse()
 	if err != nil {
-		console.ExitWithError(err)
+		fmt.Println(err)
+		os.Exit(1)
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
+	reader := protocol.NewProtocolReader(os.Stdin)
 
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		for _, cmd := range commands.CommandActions {
-			if strings.HasPrefix(line, cmd.PrefixMatcher) {
-				err := cmd.Action(options, line)
-				if err != nil {
-					console.Error(line)
-					console.ExitWithError(err)
-				}
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		console.ExitWithError(err)
+	if err := reader.ProcessMessages(protocol.DefaultHandler); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }
