@@ -26,6 +26,7 @@ func main() {
 			if strings.HasPrefix(line, cmd.PrefixMatcher) {
 				err := cmd.Action(options, line)
 				if err != nil {
+					console.Error(line)
 					console.ExitWithError(err)
 				}
 			}
