@@ -18,9 +18,9 @@ var (
 
 	logChan  chan string
 	stopChan chan struct{}
+	wg       sync.WaitGroup
 )
 
-// initLogWriter opens the log file and starts the background writer goroutine
 func initLogWriter(options *t.ArgOptions) {
 	fp, err := logfiles.GetTodaysLogFile(options)
 	if err != nil {
@@ -39,39 +39,45 @@ func initLogWriter(options *t.ArgOptions) {
 	logChan = make(chan string, 1000)
 	stopChan = make(chan struct{})
 
+	wg.Add(1)
 	go backgroundWriter()
 }
 
-// backgroundWriter consumes messages from the channel and writes to disk
 func backgroundWriter() {
+	defer wg.Done()
+
 	for {
 		select {
 		case msg := <-logChan:
 			_, _ = logWriter.WriteString(msg + "\n")
+
 		case <-stopChan:
 			return
 		}
 	}
 }
 
-// resetInit resets the once guard so initLogWriter can be called again
 func resetInit() {
 	onceMu.Lock()
 	defer onceMu.Unlock()
 	once = sync.Once{}
 }
 
-// enqueueLog sends message to the channel
 func enqueueLog(msg string) {
+	if logChan == nil {
+		return
+	}
+
 	logChan <- msg
 }
 
-// closeLogger closes writer and stops goroutine
 func closeLogger() {
 	if stopChan != nil {
 		close(stopChan)
 		stopChan = nil
 	}
+
+	wg.Wait()
 
 	if logWriter != nil {
 		_ = logWriter.Close()
@@ -79,6 +85,7 @@ func closeLogger() {
 	}
 }
 
+// List of command the stdin process runs when a matching term is found for the prefix of the line
 var CommandActions = []t.CommandAndAction{
 	{
 		PrefixMatcher: "exit",
