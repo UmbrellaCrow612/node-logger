@@ -1,6 +1,6 @@
 {
   "name": "node-logy",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A lightweight Node.js logging utility that outputs logs to the console and writes them to rotating log files. Supports different log levels, timestamps, and customizable formatting for production-ready applications.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
