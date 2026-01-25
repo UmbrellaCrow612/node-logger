@@ -17,12 +17,13 @@ const args = process.argv.slice(2);
 const options: types.NodeProcessOptions = {
   basePath: "",
   startedUtc: new Date().toUTCString(),
+  outputResponse: true,
 };
 
 /**
  * Buffer for stdin data
  */
-let buffer = "";
+let buffer = Buffer.alloc(0);
 
 /**
  * How much we store beofre we flush
@@ -54,6 +55,7 @@ let writeStream: fs.WriteStream | null = null;
  *
  */
 function flushBatch() {
+  console.log("Flush being ran");
   if (batch.length === 0) return;
 
   const data = batch.join("\n") + "\n";
@@ -61,6 +63,7 @@ function flushBatch() {
   batch = [];
 
   stopTimer();
+  console.log("Flush ran finished");
 }
 
 /** Stop the timer for flush */
@@ -131,9 +134,11 @@ function getTodaysLogFile(): string {
  * Send response back to stdout
  */
 function sendResponse(response: types.NodeProcessResponse) {
-  const json = JSON.stringify(response);
-  const header = `Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n`;
-  process.stdout.write(header + json);
+  if (options.outputResponse) {
+    const json = JSON.stringify(response);
+    const header = `Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n`;
+    process.stdout.write(header + json);
+  }
 }
 
 /**
@@ -228,33 +233,33 @@ function handleRequest(req: types.NodeProcessRequest) {
 function parseBuffer() {
   while (true) {
     const headerEnd = buffer.indexOf("\r\n\r\n");
-    if (headerEnd === -1) return; // incomplete header
+    if (headerEnd === -1) break;
 
-    const header = buffer.slice(0, headerEnd);
+    const header = buffer.subarray(0, headerEnd).toString();
     const match = header.match(/Content-Length:\s*(\d+)/i);
 
     if (!match) {
-      console.error("Malformed header: missing Content-Length");
-      return;
+      buffer = buffer.subarray(headerEnd + 4);
+      continue;
     }
 
     const contentLength = parseInt(match[1] as any, 10);
     const bodyStart = headerEnd + 4;
 
-    if (buffer.length < bodyStart + contentLength) return; // incomplete body
+    if (buffer.length < bodyStart + contentLength) break;
 
-    const body = buffer.slice(bodyStart, bodyStart + contentLength);
-    buffer = buffer.slice(bodyStart + contentLength); // consume
+    const body = buffer
+      .subarray(bodyStart, bodyStart + contentLength)
+      .toString();
+    // Move the "consume" step here
+    buffer = Buffer.from(buffer.subarray(bodyStart + contentLength));
 
-    let request: types.NodeProcessRequest;
     try {
-      request = JSON.parse(body);
-    } catch {
-      console.error("Malformed JSON body");
-      process.exit(1);
+      const request = JSON.parse(body);
+      handleRequest(request);
+    } catch (e) {
+      console.error("JSON Parse Error");
     }
-
-    handleRequest(request);
   }
 }
 
@@ -268,8 +273,8 @@ async function main() {
 
   writeStream = fs.createWriteStream(getTodaysLogFile(), { flags: "a" });
 
-  process.stdin.on("data", (chunk) => {
-    buffer += chunk;
+  process.stdin.on("data", (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
     parseBuffer();
   });
 }

@@ -21,6 +21,7 @@ const defaultOptions: types.NodeLoggerOptions = {
     WARN: "\x1b[33m", // Yellow
     ERROR: "\x1b[31m", // Red
   },
+  showConsoleOutput: true,
 };
 
 /**
@@ -94,6 +95,14 @@ class NodeLogger {
         process_path,
         `--basePath=${this._options.logFilesBasePath}`,
       ]); // we are spawing a js file so we use node
+
+      // this._spawnRef.stdout.on("data", (chunk) => {
+      //   console.log(chunk.toString()) // TODO REMOVE  
+      // })
+
+      // this._spawnRef.stderr.on("data", (chunk) => {
+      //   console.log(chunk.toString()) // TODO REMOVE 
+      // })
 
       process.on("beforeExit", () => {
         this.flush();
@@ -192,9 +201,11 @@ class NodeLogger {
       }
     }
 
-    if (level === "ERROR") console.error(fullConsoleMessage);
-    else if (level === "WARN") console.warn(fullConsoleMessage);
-    else console.log(fullConsoleMessage);
+    if (this._options.showConsoleOutput) {
+      if (level === "ERROR") console.error(fullConsoleMessage);
+      else if (level === "WARN") console.warn(fullConsoleMessage);
+      else console.log(fullConsoleMessage);
+    }
 
     if (this._options.saveToLogFile) {
       const fileTime = this._options.showLogTime ? now.toUTCString() : "";

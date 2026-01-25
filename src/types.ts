@@ -36,6 +36,11 @@ export type NodeProcessOptions = {
    * The time the process started as a string in UTC time
    */
   startedUtc: string;
+
+  /**
+   * Indicates if it should output the response messages
+   */
+  outputResponse:boolean
 };
 
 /**
@@ -82,4 +87,10 @@ export type NodeLoggerOptions = {
   colorMap: {
     [key in LogLevel]: string;
   };
+
+
+  /**
+   * Indicates if it should print messages to stdout for the logger (defaults to `true`)
+   */
+  showConsoleOutput: boolean
 };
