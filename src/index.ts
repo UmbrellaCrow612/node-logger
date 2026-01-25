@@ -189,8 +189,8 @@ class NodeLogger {
    * as if not it will keep the app alive and wait for flush command
    */
   public flush() {
-    if(this._isFlushing) return;
-    this._isFlushing = true
+    if (this._isFlushing) return;
+    this._isFlushing = true;
 
     this.writeToStdin({
       id: 1,
