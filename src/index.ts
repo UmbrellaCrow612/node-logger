@@ -203,16 +203,31 @@ class NodeLogger {
     if (this._isFlushing) return Promise.resolve();
     this._isFlushing = true;
 
-    return new Promise((resolve) => {
-      this._spawnRef?.on("exit", () => {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this._spawnRef?.removeAllListeners("exit");
+        reject(
+          new Error(
+            "Flush timed out after 4 seconds: Child process failed to exit.",
+          ),
+        );
+      }, 4000);
+
+      this._spawnRef?.once("exit", () => {
+        clearTimeout(timeout);
         resolve();
       });
 
-      this.writeToStdin({
-        id: 1,
-        method: "flush",
-        data: null,
-      });
+      try {
+        this.writeToStdin({
+          id: 1,
+          method: "flush",
+          data: null,
+        });
+      } catch (err) {
+        clearTimeout(timeout);
+        reject(err);
+      }
     });
   }
 
