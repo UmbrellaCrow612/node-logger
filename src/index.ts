@@ -97,28 +97,12 @@ class NodeLogger {
       ]); // we are spawing a js file so we use node
 
       // this._spawnRef.stdout.on("data", (chunk) => {
-      //   console.log(chunk.toString()) // TODO REMOVE  
+      //   console.log(chunk.toString()) // TODO REMOVE
       // })
 
       // this._spawnRef.stderr.on("data", (chunk) => {
-      //   console.log(chunk.toString()) // TODO REMOVE 
+      //   console.log(chunk.toString()) // TODO REMOVE
       // })
-
-      process.on("beforeExit", () => {
-        this.flush();
-      });
-
-      process.on("SIGINT", () => {
-        this.flush();
-      });
-
-      process.on("SIGTERM", () => {
-        this.flush();
-      });
-
-      process.on("uncaughtException", () => {
-        this.flush();
-      });
     }
   }
 
@@ -298,7 +282,8 @@ class NodeLogger {
     }
 
     if (!this._spawnRef || !this._spawnRef.stdin.writable) {
-      throw new Error("Cannot write to stdin");
+      console.error("Cannot write to stdin process has quit or not yet spawned")
+      return;
     }
 
     const json = JSON.stringify(request);
