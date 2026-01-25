@@ -1,3 +1,7 @@
+/**
+ * This is a self contained script that is spawend using the main node logger class as a sidecar to offload the writing logs to a log file to a serpate process
+ */
+
 import type types = require("./types");
 import fs = require("fs");
 import path = require("path");

@@ -25,7 +25,8 @@
   "license": "ISC",
   "files": [
     "README.md",
-    "dist"
+    "dist",
+    "License"
   ],
   "homepage": "https://github.com/UmbrellaCrow612/node-logger?tab=readme-ov-file#node-logger",
   "repository": {
