@@ -21,6 +21,59 @@ const options: types.NodeProcessOptions = {
 let buffer = "";
 
 /**
+ * How much we store beofre we flush
+ */
+const BATCH_SIZE = 1000;
+
+/**
+ * How long we wait and collect logs beofre flushing
+ */
+const FLUSH_MS = 50;
+
+/**
+ * Holds the messages we add to thje log file
+ */
+let batch: string[] = [];
+
+/**
+ * The timer used to run flush batches
+ */
+let timer: NodeJS.Timeout | null = null;
+
+/**
+ * The stream to write to the file
+ */
+let writeStream: fs.WriteStream | null = null;
+
+/**
+ * Write the data to the file stream
+ *
+ */
+function flushBatch() {
+  if (batch.length === 0) return;
+
+  const data = batch.join("\n") + "\n";
+  writeStream?.write(data);
+  batch = [];
+
+  if (timer) {
+    clearTimeout(timer);
+    timer = null;
+  }
+}
+
+/**
+ * Starts the flush timer to be called when it's ready
+ */
+function startTimer() {
+  if (timer) return;
+  timer = setTimeout(() => {
+    flushBatch();
+    timer = null;
+  }, FLUSH_MS);
+}
+
+/**
  * Loops through args and looks for flags and extracts and sets there values
  */
 function setOptionValues() {
@@ -48,8 +101,7 @@ function validateOptions() {
 function createBasePath() {
   try {
     if (!fs.existsSync(options.basePath)) {
-      fs.mkdirSync(options.basePath);
-      console.log("base dir " + options.basePath + " created");
+      fs.mkdirSync(options.basePath, { recursive: true });
     }
   } catch (error) {
     console.error("Failed to make base dir");
@@ -89,37 +141,57 @@ function handleRequest(req: types.NodeProcessRequest) {
     if (typeof method !== "string")
       throw new Error("Invalid or missing method");
 
-    if (method === "log") {
-      const logText = String(data);
+    switch (method) {
+      case "log":
+        const logText = String(data);
 
-      fs.appendFileSync(getTodaysLogFile(), logText + "\n");
+        batch.push(logText);
 
-      sendResponse({
-        id,
-        method,
-        success: true,
-        error: null,
-        message: "logged",
-      });
-    } else if (method === "reload") {
-      sendResponse({
-        id,
-        method,
-        success: true,
-        error: null,
-        message: "reloaded",
-      });
-    } else if (method === "flush") {
-      sendResponse({
-        id,
-        method,
-        success: true,
-        error: null,
-        message: "flushed",
-      });
-      process.exit(0);
-    } else {
-      throw new Error("Unknown method: " + method);
+        if (batch.length >= BATCH_SIZE) {
+          flushBatch();
+        } else {
+          startTimer();
+        }
+
+        sendResponse({
+          id,
+          method,
+          success: true,
+          error: null,
+          message: "queued",
+        });
+        break;
+
+      case "flush":
+        flushBatch();
+
+        sendResponse({
+          id,
+          method,
+          success: true,
+          error: null,
+          message: "flushed",
+        });
+
+        process.exit(0);
+        break;
+
+      case "reload":
+        flushBatch();
+        writeStream?.end();
+        writeStream = fs.createWriteStream(getTodaysLogFile(), { flags: "a" });
+
+        sendResponse({
+          id,
+          method,
+          success: true,
+          error: null,
+          message: "reloaded",
+        });
+        break;
+
+      default:
+        throw new Error("Unknown method: " + method);
     }
   } catch (err) {
     sendResponse({
@@ -178,6 +250,8 @@ async function main() {
   validateOptions();
   createBasePath();
 
+  writeStream = fs.createWriteStream(getTodaysLogFile(), { flags: "a" });
+
   process.stdin.on("data", (chunk) => {
     buffer += chunk;
     parseBuffer();
@@ -185,6 +259,11 @@ async function main() {
 
   process.stdin.on("end", () => {
     process.exit(0);
+  });
+
+  process.on("exit", () => {
+    flushBatch();
+    writeStream?.end();
   });
 }
 

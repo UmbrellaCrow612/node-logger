@@ -186,6 +186,7 @@ class NodeLogger {
 
   /**
    * Used to write any remaning logs to the stdin and close the sidecar logger - NEEDS to be called on app exit or on app cleanup
+   * as if not it will keep the app alive and wait for flush command
    */
   public flush() {
     if(this._isFlushing) return;
@@ -196,8 +197,6 @@ class NodeLogger {
       method: "flush",
       data: null,
     });
-
-    console.log("flush ran");
   }
 
   /**
