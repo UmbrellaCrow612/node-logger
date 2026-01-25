@@ -32,9 +32,6 @@ class NodeLogger {
    */
   private _isFlushing = false;
 
-  /** Used to toggle the stdout of the spawend process to be shown */
-  private _debug = true;
-
   /**
    * Pass additional options on initialization to change the logger's behaviour
    * @param options Change the behaviour of the logger
@@ -79,14 +76,6 @@ class NodeLogger {
         `--basePath=${this._options.logFilesBasePath}`,
       ]); // we are spawing a js file so we use node
 
-      if (this._debug) {
-        this._spawnRef.stdout.on("data", (chunk) => {
-          console.log("\n" + "stdout of spawn:" + "\n" + chunk.toString());
-        });
-        this._spawnRef.stderr.on("data", (chunk) => {
-          console.log("\n" + "stderr of spawn:" + "\n" + chunk.toString());
-        });
-      }
       process.on("beforeExit", () => {
         this.flush();
       });
