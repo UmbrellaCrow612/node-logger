@@ -44,12 +44,19 @@ class NodeLogger {
   private _isFlushing = false;
 
   /**
+   * Tracks the UTC date (YYYY-MM-DD) to handle daily file rotation
+   */
+  private _currentDateStr: string;
+
+  /**
    * Pass additional options on initialization to change the logger's behaviour
    * @param options Change the behaviour of the logger
    */
   constructor(options: Partial<types.NodeLoggerOptions> = defaultOptions) {
     const mergedColorMap = { ...defaultOptions.colorMap, ...options.colorMap };
     this._options = { ...defaultOptions, ...options, colorMap: mergedColorMap };
+
+    this._currentDateStr = this.getUtcDateString(new Date());
 
     if (typeof this._options !== "object") {
       throw new TypeError(
@@ -107,6 +114,33 @@ class NodeLogger {
   }
 
   /**
+   * Helper to format a date into a UTC YYYY-MM-DD string
+   */
+  private getUtcDateString(date: Date): string {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(date.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  /**
+   * Checks if the UTC day has changed
+   */
+  private checkDateRotation() {
+    const nowUtcStr = this.getUtcDateString(new Date());
+
+    if (nowUtcStr !== this._currentDateStr) {
+      this._currentDateStr = nowUtcStr;
+
+      this.writeToStdin({
+        id: Date.now(),
+        method: "reload",
+        data: null,
+      });
+    }
+  }
+
+  /**
    * Trys to find the `node_process` file which spawn the protcol handler
    * @returns The path to the file or undefined
    */
@@ -131,6 +165,10 @@ class NodeLogger {
   private log(level: types.LogLevel, content: unknown, ...contents: unknown[]) {
     const now = new Date();
     const logParts: string[] = [];
+
+    if (this._options.saveToLogFile) {
+      this.checkDateRotation();
+    }
 
     if (this._options.showLogTime) {
       const timestamp = now.toUTCString();
