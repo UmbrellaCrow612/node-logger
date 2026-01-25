@@ -17,7 +17,7 @@ const args = process.argv.slice(2);
 const options: types.NodeProcessOptions = {
   basePath: "",
   startedUtc: new Date().toUTCString(),
-  outputResponse: true,
+  outputResponse: false,
 };
 
 /**
@@ -251,7 +251,6 @@ function parseBuffer() {
     const body = buffer
       .subarray(bodyStart, bodyStart + contentLength)
       .toString();
-    // Move the "consume" step here
     buffer = Buffer.from(buffer.subarray(bodyStart + contentLength));
 
     try {
