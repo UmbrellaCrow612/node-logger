@@ -32,6 +32,9 @@ class NodeLogger {
    */
   private _isFlushing = false;
 
+  /** Used to toggle the stdout of the spawend process to be shown */
+  private _debug = true;
+
   /**
    * Pass additional options on initialization to change the logger's behaviour
    * @param options Change the behaviour of the logger
@@ -76,6 +79,14 @@ class NodeLogger {
         `--basePath=${this._options.logFilesBasePath}`,
       ]); // we are spawing a js file so we use node
 
+      if (this._debug) {
+        this._spawnRef.stdout.on("data", (chunk) => {
+          console.log("\n" + "stdout of spawn:" + "\n" + chunk.toString());
+        });
+        this._spawnRef.stderr.on("data", (chunk) => {
+          console.log("\n" + "stderr of spawn:" + "\n" + chunk.toString());
+        });
+      }
       process.on("beforeExit", () => {
         this.flush();
       });
@@ -188,14 +199,20 @@ class NodeLogger {
    * Used to write any remaning logs to the stdin and close the sidecar logger - NEEDS to be called on app exit or on app cleanup
    * as if not it will keep the app alive and wait for flush command
    */
-  public flush() {
-    if (this._isFlushing) return;
+  public flush(): Promise<void> {
+    if (this._isFlushing) return Promise.resolve();
     this._isFlushing = true;
 
-    this.writeToStdin({
-      id: 1,
-      method: "flush",
-      data: null,
+    return new Promise((resolve) => {
+      this._spawnRef?.on("exit", () => {
+        resolve();
+      });
+
+      this.writeToStdin({
+        id: 1,
+        method: "flush",
+        data: null,
+      });
     });
   }
 

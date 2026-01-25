@@ -56,6 +56,11 @@ function flushBatch() {
   writeStream?.write(data);
   batch = [];
 
+  stopTimer();
+}
+
+/** Stop the timer for flush */
+function stopTimer() {
   if (timer) {
     clearTimeout(timer);
     timer = null;
@@ -164,16 +169,25 @@ function handleRequest(req: types.NodeProcessRequest) {
 
       case "flush":
         flushBatch();
+        stopTimer();
 
-        sendResponse({
-          id,
-          method,
-          success: true,
-          error: null,
-          message: "flushed",
-        });
+        if (writeStream) {
+          writeStream.end();
 
-        process.exit(0);
+          writeStream.on("finish", () => {
+            sendResponse({
+              id,
+              method,
+              success: true,
+              error: null,
+              message: "flushed and closed",
+            });
+
+            process.nextTick(() => process.exit(0));
+          });
+        } else {
+          process.exit(0);
+        }
         break;
 
       case "reload":
@@ -201,8 +215,6 @@ function handleRequest(req: types.NodeProcessRequest) {
       error: err instanceof Error ? err.message : String(err),
       message: null,
     });
-
-    process.exit(1);
   }
 }
 
@@ -219,7 +231,7 @@ function parseBuffer() {
 
     if (!match) {
       console.error("Malformed header: missing Content-Length");
-      process.exit(1);
+      return;
     }
 
     const contentLength = parseInt(match[1] as any, 10);
@@ -255,15 +267,6 @@ async function main() {
   process.stdin.on("data", (chunk) => {
     buffer += chunk;
     parseBuffer();
-  });
-
-  process.stdin.on("end", () => {
-    process.exit(0);
-  });
-
-  process.on("exit", () => {
-    flushBatch();
-    writeStream?.end();
   });
 }
 
