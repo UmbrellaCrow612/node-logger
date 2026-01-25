@@ -69,6 +69,15 @@ export type NodeLoggerOptions = {
 
   /**
    * Mapped type: Each LogLevel must correspond to a string color value
+   * 
+   * (default)
+   * ```js
+   *   colorMap: {
+        INFO: "\x1b[32m", // Green
+        WARN: "\x1b[33m", // Yellow
+        ERROR: "\x1b[31m", // Red
+  },
+   * ```
    */
   colorMap: {
     [key in LogLevel]: string;
