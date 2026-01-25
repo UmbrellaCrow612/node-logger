@@ -61,4 +61,16 @@ export type NodeLoggerOptions = {
    * Indicates if it should add the time of when the log was made for a given log item (defaults to `true`)
    */
   showLogTime: boolean;
+
+  /**
+   * Indicates if it should use colored console outputs (defaults to `true`)
+   */
+  useAnsiColors: boolean;
+
+  /**
+   * Mapped type: Each LogLevel must correspond to a string color value
+   */
+  colorMap: {
+    [key in LogLevel]: string;
+  };
 };

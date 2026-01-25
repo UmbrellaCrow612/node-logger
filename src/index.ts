@@ -4,12 +4,23 @@ import fs = require("fs");
 import type types = require("./types");
 
 /**
+ * ANSI Escape Codes for terminal colors
+ */
+const ANSI_RESET = "\x1b[0m";
+
+/**
  * Holds default options for the logger
  */
 const defaultOptions: types.NodeLoggerOptions = {
   logFilesBasePath: "./logs",
   saveToLogFile: true,
   showLogTime: true,
+  useAnsiColors: true,
+  colorMap: {
+    INFO: "\x1b[32m", // Green
+    WARN: "\x1b[33m", // Yellow
+    ERROR: "\x1b[31m", // Red
+  },
 };
 
 /**
@@ -37,7 +48,8 @@ class NodeLogger {
    * @param options Change the behaviour of the logger
    */
   constructor(options: Partial<types.NodeLoggerOptions> = defaultOptions) {
-    this._options = { ...defaultOptions, ...options };
+    const mergedColorMap = { ...defaultOptions.colorMap, ...options.colorMap };
+    this._options = { ...defaultOptions, ...options, colorMap: mergedColorMap };
 
     if (typeof this._options !== "object") {
       throw new TypeError(
@@ -133,7 +145,14 @@ class NodeLogger {
     });
     logParts.push(message);
 
-    const fullConsoleMessage = logParts.join(" ");
+    let fullConsoleMessage = logParts.join(" ");
+
+    if (this._options.useAnsiColors) {
+      const colorCode = this._options.colorMap[level];
+      if (colorCode) {
+        fullConsoleMessage = `${colorCode}${fullConsoleMessage}${ANSI_RESET}`;
+      }
+    }
 
     if (level === "ERROR") console.error(fullConsoleMessage);
     else if (level === "WARN") console.warn(fullConsoleMessage);
