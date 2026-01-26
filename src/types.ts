@@ -93,4 +93,9 @@ export type NodeLoggerOptions = {
    * Indicates if it should print messages to stdout for the logger (defaults to `true`)
    */
   showConsoleOutput: boolean
+
+  /**
+   * Indicates if it should also show the stack trace of where the log came from (defaults to `false`)
+   */
+  showStackTraceOfLogCalls: boolean 
 };

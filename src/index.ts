@@ -22,6 +22,7 @@ const defaultOptions: types.NodeLoggerOptions = {
     ERROR: "\x1b[31m", // Red
   },
   showConsoleOutput: true,
+  showStackTraceOfLogCalls: false,
 };
 
 /**
@@ -85,7 +86,7 @@ class NodeLogger {
       this._options.logFilesBasePath,
     );
 
-    if (options.saveToLogFile) {
+    if (this._options.saveToLogFile) {
       let process_path = this.findNodeProcessFile();
       if (!process_path) {
         throw new Error("Failed ot find node_process file");
@@ -161,6 +162,11 @@ class NodeLogger {
 
     if (this._options.saveToLogFile) {
       this.checkDateRotation();
+    }
+
+    const callStack = this.getLogCallStack();
+    if (callStack) {
+      logParts.push(callStack);
     }
 
     if (this._options.showLogTime) {
@@ -241,7 +247,8 @@ class NodeLogger {
    * as if not it will keep the app alive and wait for flush command
    */
   public flush(): Promise<void> {
-    if (this._isFlushing) return Promise.resolve();
+    if (this._isFlushing || !this._options.saveToLogFile)
+      return Promise.resolve();
     this._isFlushing = true;
 
     return new Promise((resolve, reject) => {
@@ -273,6 +280,21 @@ class NodeLogger {
   }
 
   /**
+   * Captures the stack trace of the caller of the logger (not the logger itself)
+   */
+  private getLogCallStack(): string | null {
+    if (!this._options.showStackTraceOfLogCalls) return null;
+
+    const err = new Error();
+
+    if (!err.stack) return null;
+
+    const lines = err.stack.split("\n");
+
+    return lines[4]?.trim() || null;
+  }
+
+  /**
    * Write to the stdin of the process in the protocol defined
    * @param request The request payload
    */
@@ -282,8 +304,13 @@ class NodeLogger {
     }
 
     if (!this._spawnRef || !this._spawnRef.stdin.writable) {
-      console.error("Cannot write to stdin process has quit or not yet spawned")
-      return;
+      console.error(
+        "Cannot write to stdin process has quit or not yet spawned",
+      );
+      throw new Error(
+        "Cannot write to stdin process has quit or not yet spawned options: " +
+          this.extractErrorInfo(this._options),
+      );
     }
 
     const json = JSON.stringify(request);
