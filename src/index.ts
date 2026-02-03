@@ -176,9 +176,9 @@ class NodeLogger {
 
     logParts.push(`[${level}]`);
 
-    let message = `${this.extractErrorInfo(content)}`;
+    let message = `${this.extractInfo(content)}`;
     contents.forEach((m) => {
-      message += ` ${this.extractErrorInfo(m)}`;
+      message += ` ${this.extractInfo(m)}`;
     });
     logParts.push(message);
 
@@ -309,7 +309,7 @@ class NodeLogger {
       );
       throw new Error(
         "Cannot write to stdin process has quit or not yet spawned options: " +
-          this.extractErrorInfo(this._options),
+          this.extractInfo(this._options),
       );
     }
 
@@ -321,104 +321,108 @@ class NodeLogger {
       this._spawnRef.stdin.write(payload);
     } catch (error) {
       console.error("Failed to write to node_process");
-      console.error(this.extractErrorInfo(error));
+      console.error(this.extractInfo(error));
       this._spawnRef.kill();
       throw error;
     }
   }
 
   /**
-   * Extracts as much information as possible from an error or object and returns it as a string
-   * @param error The error object or any object to extract information from
+   * Extracts as much information as possible from an error or object or any other type and returns it as a string, if it has multiple fields to it
+   * then they will be serpated by new lines
+   * @param object The error object or any object to extract information from
    * @returns A detailed string representation of the error/object
    */
-  private extractErrorInfo(error: unknown): string {
+  private extractInfo(object: unknown): string {
     const parts: string[] = [];
 
-    if (error === null) return "null";
-    if (error === undefined) return "undefined";
+    if (object === null) return "null";
+    if (object === undefined) return "undefined";
 
-    if (typeof error !== "object") {
-      return String(error);
-    }
+    const type = typeof object;
 
-    if (error instanceof Error) {
-      if (error.name) parts.push(`Name: ${error.name}`);
-      if (error.message) parts.push(`Message: ${error.message}`);
-
-      if (error.stack) {
-        parts.push(`Stack: ${error.stack}`);
-      }
-
-      const nodeError = error as any;
-      if (nodeError.code) parts.push(`Code: ${nodeError.code}`);
-      if (nodeError.errno) parts.push(`Errno: ${nodeError.errno}`);
-      if (nodeError.syscall) parts.push(`Syscall: ${nodeError.syscall}`);
-      if (nodeError.path) parts.push(`Path: ${nodeError.path}`);
-      if (nodeError.port) parts.push(`Port: ${nodeError.port}`);
-      if (nodeError.address) parts.push(`Address: ${nodeError.address}`);
-      if (nodeError.dest) parts.push(`Dest: ${nodeError.dest}`);
-    }
-
-    try {
-      const obj = error as Record<string, unknown>;
-      const keys = Object.keys(obj);
-
-      for (const key of keys) {
-        if (
-          error instanceof Error &&
-          ["name", "message", "stack"].includes(key)
-        ) {
-          continue;
-        }
-
-        try {
-          const value = obj[key];
-
-          if (value === null) {
-            parts.push(`${key}: null`);
-          } else if (value === undefined) {
-            parts.push(`${key}: undefined`);
-          } else if (typeof value === "function") {
-            parts.push(`${key}: [Function]`);
-          } else if (typeof value === "object") {
-            try {
-              const stringified = JSON.stringify(value, null, 2);
-              parts.push(`${key}: ${stringified}`);
-            } catch {
-              parts.push(`${key}: [Object - could not stringify]`);
-            }
-          } else {
-            parts.push(`${key}: ${String(value)}`);
-          }
-        } catch {
-          parts.push(`${key}: [Could not access property]`);
-        }
-      }
-    } catch {}
-
-    if (parts.length > 0) {
+    if (type === "symbol") {
+      parts.push(`symbol: ${object.toString()}`);
+      parts.push(`description: ${(object as symbol).description}`);
       return parts.join("\n");
     }
 
-    try {
-      const obj = error as any;
+    if (type === "boolean" || type === "number" || type === "bigint")
+      return `${object}`;
+    if (type === "string") return object as string;
 
-      if (
-        typeof obj.toString === "function" &&
-        obj.toString !== Object.prototype.toString
-      ) {
-        return obj.toString();
+    if (type === "function") {
+      const fn = object as Function;
+      parts.push(`name: ${fn.name || "(anonymous)"}`);
+      parts.push(`params (length): ${fn.length}`);
+      parts.push(`isAsync: ${fn.constructor.name === "AsyncFunction"}`);
+      parts.push(`isGenerator: ${fn.constructor.name === "GeneratorFunction"}`);
+      parts.push(`isArrowFunction: ${!fn.hasOwnProperty("prototype")}`);
+      parts.push(`hasPrototype: ${!!fn.prototype}`);
+      parts.push(`constructor: ${fn.constructor.name}`);
+      parts.push(`source: ${fn.toString()}`);
+      if (fn.prototype) {
+        parts.push(
+          `prototype keys: ${Object.keys(fn.prototype).join(", ") || "(none)"}`,
+        );
       }
-
-      if (typeof obj.toJSON === "function") {
-        return JSON.stringify(obj.toJSON(), null, 2);
-      }
-
-      return JSON.stringify(error, null, 2);
-    } catch {
-      return "[Unable to extract error information]";
+      return parts.join("\n");
     }
+
+    if (object instanceof Error) {
+      const err = object as Error & Record<string, unknown>;
+
+      if (err.name) parts.push(`Name: ${err.name}`);
+      if (err.message) parts.push(`Message: ${err.message}`);
+      if (err.stack) parts.push(`Stack: ${err.stack}`);
+
+      if ((err as any).code) parts.push(`Code: ${(err as any).code}`);
+      if ((err as any).errno !== undefined)
+        parts.push(`Errno: ${(err as any).errno}`);
+      if ((err as any).syscall) parts.push(`Syscall: ${(err as any).syscall}`);
+      if ((err as any).path) parts.push(`Path: ${(err as any).path}`);
+      if ((err as any).port) parts.push(`Port: ${(err as any).port}`);
+      if ((err as any).address) parts.push(`Address: ${(err as any).address}`);
+      if ((err as any).dest) parts.push(`Dest: ${(err as any).dest}`);
+
+      // Include any additional custom properties
+      for (const key of Object.keys(err)) {
+        if (
+          ![
+            "name",
+            "message",
+            "stack",
+            "code",
+            "errno",
+            "syscall",
+            "path",
+            "address",
+            "port",
+            "errors",
+          ].includes(key)
+        ) {
+          parts.push(`${key}: ${err[key]}`);
+        }
+      }
+
+      if ("errors" in err && Array.isArray((err as any).errors)) {
+        const nested = (err as any).errors
+          .map((e: unknown, i: number) => `  [${i}] ${this.extractInfo(e)}`)
+          .join("\n");
+        parts.push(`Nested Errors:\n${nested}`);
+      }
+
+      return parts.join("\n");
+    }
+
+    if (type === "object") {
+      const obj = object as Record<string, unknown>;
+      for (const key of Object.keys(obj)) {
+        parts.push(`${key}: ${obj[key]}`);
+      }
+    }
+
+    return parts.length > 0 ? parts.join("\n") : "unknown";
   }
 }
 
