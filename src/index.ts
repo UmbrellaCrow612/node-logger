@@ -357,7 +357,7 @@ class NodeLogger {
       parts.push(`params (length): ${fn.length}`);
       parts.push(`isAsync: ${fn.constructor.name === "AsyncFunction"}`);
       parts.push(`isGenerator: ${fn.constructor.name === "GeneratorFunction"}`);
-      parts.push(`isArrowFunction: !fn.hasOwnProperty("prototype")`);
+      parts.push(`isArrowFunction: ${!fn.hasOwnProperty("prototype")}`);
       parts.push(`hasPrototype: ${!!fn.prototype}`);
       parts.push(`constructor: ${fn.constructor.name}`);
       parts.push(`source: ${fn.toString()}`);
