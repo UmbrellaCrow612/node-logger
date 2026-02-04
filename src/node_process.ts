@@ -63,7 +63,6 @@ function flushBatch() {
   batch = [];
 
   stopTimer();
-  console.log("Flush ran finished");
 }
 
 /** Stop the timer for flush */
@@ -180,23 +179,22 @@ function handleRequest(req: types.NodeProcessRequest) {
         flushBatch();
         stopTimer();
 
-        if (writeStream) {
-          writeStream.end();
+        process.stdin.removeAllListeners(); // stops process hanging
+        process.stdin.destroy();
 
-          writeStream.on("finish", () => {
-            sendResponse({
-              id,
-              method,
-              success: true,
-              error: null,
-              message: "flushed and closed",
-            });
+        writeStream?.end(); // stops process hanging
+        writeStream?.destroy();
 
-            process.nextTick(() => process.exit(0));
-          });
-        } else {
-          process.exit(0);
-        }
+        sendResponse({
+          id,
+          method,
+          success: true,
+          error: null,
+          message: "flushed and closed",
+        });
+
+        process.stdout.removeAllListeners(); // stops process hanging
+        process.stdout.destroy();
         break;
 
       case "reload":

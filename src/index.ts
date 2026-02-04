@@ -96,14 +96,6 @@ class NodeLogger {
         process_path,
         `--basePath=${this._options.logFilesBasePath}`,
       ]); // we are spawing a js file so we use node
-
-      // this._spawnRef.stdout.on("data", (chunk) => {
-      //   console.log(chunk.toString()) // TODO REMOVE
-      // })
-
-      // this._spawnRef.stderr.on("data", (chunk) => {
-      //   console.log(chunk.toString()) // TODO REMOVE
-      // })
     }
   }
 
@@ -261,7 +253,7 @@ class NodeLogger {
         );
       }, 4000);
 
-      this._spawnRef?.once("exit", () => {
+      this._spawnRef?.on("exit", () => {
         clearTimeout(timeout);
         resolve();
       });
