@@ -190,7 +190,7 @@ export class Logger {
    * Get the string representation of a log level
    */
   private _getLevelString(level: LogLevelType): string {
-    return this._options.logLevelMap[level] ?? "UNKNOWN"
+    return this._options.logLevelMap[level] ?? "UNKNOWN";
   }
 
   /**
@@ -199,6 +199,67 @@ export class Logger {
   private _stringify(value: any): string {
     if (value === null) return "null";
     if (value === undefined) return "undefined";
+
+    // Check if value is an Error instance
+    if (value instanceof Error) {
+      const errorParts: string[] = [];
+
+      // Always present Error properties
+      errorParts.push(`name: ${value.name}`);
+      errorParts.push(`message: ${value.message}`);
+
+      if (value.stack) {
+        errorParts.push(`stack: ${value.stack}`);
+      }
+
+      // Additional common Error properties
+      if ("code" in value && value.code !== undefined) {
+        errorParts.push(`code: ${value.code}`);
+      }
+
+      if ("errno" in value && value.errno !== undefined) {
+        errorParts.push(`errno: ${value.errno}`);
+      }
+
+      if ("syscall" in value && value.syscall !== undefined) {
+        errorParts.push(`syscall: ${value.syscall}`);
+      }
+
+      if ("path" in value && value.path !== undefined) {
+        errorParts.push(`path: ${value.path}`);
+      }
+
+      // Capture any other enumerable or non-enumerable custom properties
+      const standardProps = [
+        "name",
+        "message",
+        "stack",
+        "code",
+        "errno",
+        "syscall",
+        "path",
+      ];
+      const allProps = Object.getOwnPropertyNames(value);
+
+      for (const prop of allProps) {
+        if (!standardProps.includes(prop)) {
+          try {
+            const propValue = (value as any)[prop];
+            // Avoid circular references by doing a simple type check
+            if (typeof propValue === "object" && propValue !== null) {
+              errorParts.push(`${prop}: [object]`);
+            } else {
+              errorParts.push(`${prop}: ${propValue}`);
+            }
+          } catch {
+            errorParts.push(`${prop}: [unreadable]`);
+          }
+        }
+      }
+
+      return `Error { ${errorParts.join(", ")} }`;
+    }
+
     if (typeof value === "object") {
       try {
         return JSON.stringify(value, null, 2);

@@ -4,6 +4,6 @@ const logger = new Logger();
 
 logger.info("Info")
 logger.debug("Debug")
-logger.error("Error")
+logger.error("Error", new Error("yo"))
 logger.fatal("Fatal")
 logger.warn("Warn")
