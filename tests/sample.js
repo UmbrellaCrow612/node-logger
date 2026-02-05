@@ -3,11 +3,7 @@ const { LogLevel } = require("../dist/protocol");
 
 console.log("=== 1. NO FILTER (default) ===");
 const logger1 = new Logger({
-  timestampType: "short",
-  outputToConsole: true,
-  showHostname: true,
-  showProcessId: true,
-  environment: "dev",
+ 
 });
 logger1.debug("Debug message");
 logger1.info("Info message");

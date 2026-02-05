@@ -112,6 +112,11 @@ export type LoggerOptions = {
    * Include environment name (dev/prod) in logs
    */
   environment?: string;
+
+  /**
+   * Show where it was called at (file:line:column)
+   */
+  showCallSite?: boolean;
 };
 
 /**
@@ -143,7 +148,7 @@ const Colors = {
 const defaultLoggerOptions: LoggerOptions = {
   basePath: "./logs",
   outputToConsole: true,
-  saveToLogFiles: true,
+  saveToLogFiles: false,
   useColoredOutput: true,
   colorMap: {
     [LogLevel.INFO]: Colors.cyan,
@@ -246,6 +251,51 @@ export class Logger {
     }
 
     this._verifyWritable();
+  }
+
+  /**
+   * Extract call site information (file:line:column) from stack trace
+   */
+  private _getCallSite(): string {
+    const originalPrepareStackTrace = Error.prepareStackTrace;
+
+    try {
+      Error.prepareStackTrace = (_, stack) => stack;
+      const err = new Error();
+      const stack = err.stack as unknown as NodeJS.CallSite[];
+
+      // Find the first frame outside of logger.ts (skip internal calls)
+      // Stack indices: 0 = _getCallSite, 1 = _formatMessage/log, 2 = actual caller
+      let frameIndex = 2;
+
+      // Skip internal logger methods to find actual caller
+      while (
+        frameIndex < stack.length &&
+        stack[frameIndex] &&
+        stack[frameIndex]?.getFileName()?.includes(__filename)
+      ) {
+        frameIndex++;
+      }
+
+      const frame = stack[frameIndex];
+
+      if (!frame) {
+        return "unknown";
+      }
+
+      const fileName = frame.getFileName() || "unknown";
+      const lineNumber = frame.getLineNumber() || 0;
+      const columnNumber = frame.getColumnNumber() || 0;
+
+      // Get just the filename, not full path (optional - remove path.basename if you want full path)
+      const shortFileName = path.basename(fileName);
+
+      return `${shortFileName}:${lineNumber}:${columnNumber}`;
+    } catch {
+      return "unknown";
+    } finally {
+      Error.prepareStackTrace = originalPrepareStackTrace;
+    }
   }
 
   /**
@@ -475,6 +525,12 @@ export class Logger {
   ): string {
     const parts: string[] = [];
 
+    // Add call site if enabled
+    if (this._options.showCallSite) {
+      const callSite = this._getCallSite();
+      parts.push(`[${callSite}]`);
+    }
+
     // Add environment if enabled
     if (this._options.environment) {
       parts.push(`[${this._options.environment}]`);
@@ -488,12 +544,6 @@ export class Logger {
     // Add process ID if enabled
     if (this._options.showProcessId) {
       parts.push(`[${process.pid}]`);
-    }
-
-    // Add timestamp if enabled
-    if (this._options.showTimeStamps) {
-      const timestamp = this._formatTimestamp(new Date());
-      parts.push(`[${timestamp}]`);
     }
 
     // Add timestamp if enabled
@@ -542,7 +592,8 @@ export class Logger {
       this._options.showHostname ||
       this._options.showProcessId ||
       this._options.showTimeStamps ||
-      this._options.showLogLevel;
+      this._options.showLogLevel ||
+      this._options.showCallSite;
 
     if (hasPrefix) {
       const separatorIndex = message.indexOf(": ");
