@@ -1,3 +1,4 @@
+import { LogLevel } from "./../dist/types.d";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -80,7 +81,7 @@ export class Logger {
    */
   private _initializeDirectory(): void {
     if (!this._options.saveToLogFiles) {
-      return; 
+      return;
     }
 
     try {
@@ -112,6 +113,14 @@ export class Logger {
       );
     }
   }
+
+  /**
+   * Log a specific level and messages
+   * @param level The log level to print
+   * @param message The content of the message
+   * @param messages Addtional messages
+   */
+  log(level: LogLevel, message: any, ...messages): void {}
 
   /**
    * Get current logger options (read-only copy)
