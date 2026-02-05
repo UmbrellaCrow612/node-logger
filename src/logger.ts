@@ -212,7 +212,7 @@ export class Logger {
    * Get the next ID
    * @returns ID
    */
-  private _getId = () => this._id++;
+  private _getNextId = () => this._id++;
 
   /**
    * Maps specific request id's to there promise's made
@@ -322,6 +322,7 @@ export class Logger {
 
       this._process = spawn("node", [processPath], {
         stdio: ["pipe", "pipe", "pipe"],
+        env: { LOG_BASE_PATH: this._options.basePath },
         detached: false,
       });
 
@@ -620,7 +621,7 @@ export class Logger {
     payload: string,
     level: LogLevelType,
   ): Promise<void> {
-    const id = this._getId();
+    const id = this._getNextId();
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (this._pending.has(id)) {
@@ -863,7 +864,7 @@ export class Logger {
 
     if (this._options.saveToLogFiles) {
       this._writeToStdin({
-        id: this._getId(),
+        id: this._getNextId(),
         level,
         method: method.LOG,
         payload: formattedMessage,
