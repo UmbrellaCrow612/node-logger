@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  LogLevel,
+  LOG_LEVEL,
   LogLevelType,
-  method,
+  METHOD,
   MethodType,
   Request,
   RequestEncoder,
@@ -133,11 +133,11 @@ export type LoggerOptions = {
  * Numeric priority for log levels (higher = more severe)
  */
 const LogLevelPriority: Record<LogLevelType, number> = {
-  [LogLevel.DEBUG]: 0,
-  [LogLevel.INFO]: 1,
-  [LogLevel.WARN]: 2,
-  [LogLevel.ERROR]: 3,
-  [LogLevel.FATAL]: 4,
+  [LOG_LEVEL.DEBUG]: 0,
+  [LOG_LEVEL.INFO]: 1,
+  [LOG_LEVEL.WARN]: 2,
+  [LOG_LEVEL.ERROR]: 3,
+  [LOG_LEVEL.FATAL]: 4,
 };
 
 // ANSI color codes
@@ -161,21 +161,21 @@ const defaultLoggerOptions: LoggerOptions = {
   saveToLogFiles: false,
   useColoredOutput: true,
   colorMap: {
-    [LogLevel.INFO]: Colors.cyan,
-    [LogLevel.WARN]: Colors.yellow,
-    [LogLevel.ERROR]: Colors.red,
-    [LogLevel.DEBUG]: Colors.gray,
-    [LogLevel.FATAL]: Colors.magenta,
+    [LOG_LEVEL.INFO]: Colors.cyan,
+    [LOG_LEVEL.WARN]: Colors.yellow,
+    [LOG_LEVEL.ERROR]: Colors.red,
+    [LOG_LEVEL.DEBUG]: Colors.gray,
+    [LOG_LEVEL.FATAL]: Colors.magenta,
   },
   showTimeStamps: true,
   timestampType: "iso",
   showLogLevel: true,
   logLevelMap: {
-    [LogLevel.INFO]: "INFO",
-    [LogLevel.WARN]: "WARN",
-    [LogLevel.ERROR]: "ERROR",
-    [LogLevel.DEBUG]: "DEBUG",
-    [LogLevel.FATAL]: "FATAL",
+    [LOG_LEVEL.INFO]: "INFO",
+    [LOG_LEVEL.WARN]: "WARN",
+    [LOG_LEVEL.ERROR]: "ERROR",
+    [LOG_LEVEL.DEBUG]: "DEBUG",
+    [LOG_LEVEL.FATAL]: "FATAL",
   },
 };
 
@@ -952,7 +952,7 @@ export class Logger {
     if (this._options.outputToConsole) {
       const coloredMessage = this._colorize(level, formattedMessage);
 
-      if (level === LogLevel.ERROR || level === LogLevel.FATAL) {
+      if (level === LOG_LEVEL.ERROR || level === LOG_LEVEL.FATAL) {
         process.stderr.write(coloredMessage + "\n");
       } else {
         process.stdout.write(coloredMessage + "\n");
@@ -963,7 +963,7 @@ export class Logger {
       this._writeToStdin({
         id: this._getNextId(),
         level,
-        method: method.LOG,
+        method: METHOD.LOG,
         payload: formattedMessage,
       }).catch((err) => {
         process.stderr.write(
@@ -977,35 +977,35 @@ export class Logger {
    * Convenience method for INFO level
    */
   info(message: any, ...messages: any[]): void {
-    this.log(LogLevel.INFO, message, ...messages);
+    this.log(LOG_LEVEL.INFO, message, ...messages);
   }
 
   /**
    * Convenience method for WARN level
    */
   warn(message: any, ...messages: any[]): void {
-    this.log(LogLevel.WARN, message, ...messages);
+    this.log(LOG_LEVEL.WARN, message, ...messages);
   }
 
   /**
    * Convenience method for ERROR level
    */
   error(message: any, ...messages: any[]): void {
-    this.log(LogLevel.ERROR, message, ...messages);
+    this.log(LOG_LEVEL.ERROR, message, ...messages);
   }
 
   /**
    * Convenience method for DEBUG level
    */
   debug(message: any, ...messages: any[]): void {
-    this.log(LogLevel.DEBUG, message, ...messages);
+    this.log(LOG_LEVEL.DEBUG, message, ...messages);
   }
 
   /**
    * Convenience method for FATAL level
    */
   fatal(message: any, ...messages: any[]): void {
-    this.log(LogLevel.FATAL, message, ...messages);
+    this.log(LOG_LEVEL.FATAL, message, ...messages);
   }
 
   /**
@@ -1013,7 +1013,7 @@ export class Logger {
    */
   async flush(): Promise<void> {
     try {
-      return await this._sendRequest(method.FLUSH, "", LogLevel.INFO);
+      return await this._sendRequest(METHOD.FLUSH, "", LOG_LEVEL.INFO);
     } finally {
       this._cleanupProcess();
     }

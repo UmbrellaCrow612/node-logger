@@ -5,12 +5,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  method,
+  METHOD,
   Request,
   Response,
   ResponseEncoder,
   ProtocolError,
-  LogLevel,
+  LOG_LEVEL,
 } from "./protocol";
 
 // Configuration
@@ -189,11 +189,11 @@ function processRequest(basePath: string, request: Request): void {
 
   try {
     switch (request.method) {
-      case method.LOG:
+      case METHOD.LOG:
         handleLog(basePath, request.payload);
         break;
 
-      case method.FLUSH:
+      case METHOD.FLUSH:
         handleFlush(basePath);
         sendResponse({
           id: request.id,
@@ -203,7 +203,7 @@ function processRequest(basePath: string, request: Request): void {
         });
         break;
 
-      case method.RELOAD:
+      case METHOD.RELOAD:
         handleReload(basePath);
         sendResponse({
           id: request.id,
@@ -259,7 +259,7 @@ async function main() {
         buffer = buffer.subarray(fullMessageSize);
 
         // Process the request
-        processRequest(basePath, {id: 1, level: LogLevel.DEBUG, payload: "", method: method.FLUSH });
+        processRequest(basePath, {id: 1, level: LOG_LEVEL.DEBUG, payload: "", method: METHOD.FLUSH });
       } catch (err) {
         if (err instanceof ProtocolError) {
           process.stderr.write(`Protocol error: ${(err as Error).message}\n`);

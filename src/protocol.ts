@@ -1,7 +1,7 @@
 /**
  * Contains all methods a request / response can have
  */
-export const method = {
+export const METHOD = {
   /**
    * Indicates log information
    */
@@ -21,12 +21,12 @@ export const method = {
 /**
  * Contains a set of valid methods
  */
-export const VALID_METHODS: Set<number> = new Set(Object.values(method));
+export const VALID_METHODS: Set<number> = new Set(Object.values(METHOD));
 
 /**
  * Contains all the levels logs can be indicating there importance
  */
-export const LogLevel = {
+export const LOG_LEVEL = {
   /**
    * Used for information
    */
@@ -56,17 +56,17 @@ export const LogLevel = {
 /**
  * Contains a set of valid log levels
  */
-export const VALID_LOG_LEVELS: Set<number> = new Set(Object.values(LogLevel));
+export const VALID_LOG_LEVELS: Set<number> = new Set(Object.values(LOG_LEVEL));
 
 /**
  * What value the method can be for a request
  */
-export type MethodType = (typeof method)[keyof typeof method];
+export type MethodType = (typeof METHOD)[keyof typeof METHOD];
 
 /**
  * What type the level can be for a request
  */
-export type LogLevelType = (typeof LogLevel)[keyof typeof LogLevel];
+export type LogLevelType = (typeof LOG_LEVEL)[keyof typeof LOG_LEVEL];
 
 /**
  * Represents a request message object used to send messages to the log stream.
@@ -218,6 +218,46 @@ export class RequestEncoder {
     return buffer;
   }
 
+  /**
+   * Decode a binary protocol buffer to a request object
+   * @param buffer The binary protocol buffer
+   * @returns The decoded request object
+   */
+  decode(buffer: Buffer): Request {
+    if (buffer.length < RequestEncoder.HEADER_SIZE) {
+      throw new ProtocolError(
+        `Buffer too small: ${buffer.length} bytes, minimum ${RequestEncoder.HEADER_SIZE} bytes required`,
+      );
+    }
+
+    const id = buffer.readUInt32BE(0);
+    const method = buffer[4] as number;
+    const level = buffer[5] as number;
+    const payloadLength = buffer.readUInt16BE(6);
+
+    if (buffer.length !== RequestEncoder.HEADER_SIZE + payloadLength) {
+      throw new ProtocolError(
+        `Buffer size mismatch: expected ${RequestEncoder.HEADER_SIZE + payloadLength} bytes, got ${buffer.length} bytes`,
+      );
+    }
+
+    if (!this.validMethods.has(method)) {
+      throw new ProtocolError(`Invalid method: ${method}`);
+    }
+    if (!this.validLevels.has(level)) {
+      throw new ProtocolError(`Invalid level: ${level}`);
+    }
+
+    const payload = buffer.subarray(8, 8 + payloadLength).toString("utf-8");
+
+    return {
+      id,
+      method: method as MethodType,
+      level: level as LogLevelType,
+      payload,
+    };
+  }
+
   static getHeaderSize(): number {
     return RequestEncoder.HEADER_SIZE;
   }
@@ -231,17 +271,17 @@ export class ResponseEncoder {
   private static readonly MAX_ID = 0xffffffff; // uint32 max
 
   private static readonly VALID_METHODS: Set<number> = new Set([
-    method.LOG,
-    method.FLUSH,
-    method.RELOAD,
+    METHOD.LOG,
+    METHOD.FLUSH,
+    METHOD.RELOAD,
   ]);
 
   private static readonly VALID_LEVELS: Set<number> = new Set([
-    LogLevel.INFO,
-    LogLevel.WARN,
-    LogLevel.ERROR,
-    LogLevel.DEBUG,
-    LogLevel.FATAL,
+    LOG_LEVEL.INFO,
+    LOG_LEVEL.WARN,
+    LOG_LEVEL.ERROR,
+    LOG_LEVEL.DEBUG,
+    LOG_LEVEL.FATAL,
   ]);
 
   /**
