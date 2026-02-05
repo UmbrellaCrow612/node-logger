@@ -239,25 +239,30 @@ async function main() {
     // Process complete requests
     while (buffer.length >= headerSize) {
       try {
-        // Try to decode - this validates header and extracts payload length
-        const request = requestEncoder.decode(buffer);
-        const fullMessageSize =
-          headerSize + Buffer.byteLength(request.payload, "utf-8");
+        // Peek at payload length from header without full decode
+        const payloadLength = buffer.readUInt16BE(6); // Offset 6 is payload length
 
-        // Remove processed bytes from buffer
+        const fullMessageSize = headerSize + payloadLength;
+
+        // Check if we have complete message
+        if (buffer.length < fullMessageSize) {
+          break; // Wait for more data
+        }
+
+        // Now decode the complete message
+        const request = requestEncoder.decode(
+          buffer.subarray(0, fullMessageSize),
+        );
+
+        // Remove processed bytes
         buffer = buffer.subarray(fullMessageSize);
 
         // Process the request
         processRequest(basePath, request);
       } catch (err) {
         if (err instanceof ProtocolError) {
-          // Incomplete data or malformed - wait for more or resync
-          if ((err as ProtocolError).message.includes("Buffer too small")) {
-            break; // Wait for more data
-          }
-
-          // Malformed data - try to resync by removing first byte
           process.stderr.write(`Protocol error: ${(err as Error).message}\n`);
+          // Resync: remove first byte and try again
           buffer = buffer.subarray(1);
         } else {
           throw err;

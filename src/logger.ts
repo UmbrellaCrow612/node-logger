@@ -204,6 +204,16 @@ export class Logger {
   private _process: ChildProcessWithoutNullStreams | null = null;
 
   /**
+   * Queue for pending writes to prevent interleaving
+   */
+  private _writeQueue: Array<{
+    request: Request;
+    resolve: () => void;
+    reject: (err: Error) => void;
+  }> = [];
+  private _isWriting = false;
+
+  /**
    * Id tracker
    */
   private _id = 0;
@@ -616,18 +626,17 @@ export class Logger {
    * @param method The specific method to send
    * @returns Promise that resolves if the request got a response
    */
-  private _sendRequest(
+  private async _sendRequest(
     method: MethodType,
     payload: string,
     level: LogLevelType,
   ): Promise<void> {
     const id = this._getNextId();
-    return new Promise((resolve, reject) => {
+
+    return new Promise(async (resolve, reject) => {
       const timeout = setTimeout(() => {
-        if (this._pending.has(id)) {
-          this._pending.get(id)?.rej(new Error("Request timed out"));
-          this._pending.delete(id);
-        }
+        this._pending.delete(id);
+        reject(new Error("Request timed out"));
       }, 5000);
 
       this._pending.set(id, {
@@ -641,22 +650,104 @@ export class Logger {
         },
       });
 
-      this._writeToStdin({ id, level, method, payload });
+      try {
+        await this._writeToStdin({ id, level, method, payload });
+      } catch (err) {
+        clearTimeout(timeout);
+        this._pending.delete(id);
+        reject(err);
+      }
     });
   }
 
-  private _writeToStdin(request: Request) {
-    try {
-      const protocol = this._requestEncoder.encode(request);
-      this._process?.stdin.write(protocol);
-    } catch (error) {
-      const err = error as Error;
-      process.stderr.write(
-        `Failed to write to stdin of process: ${err.message}`,
-      );
+  /**
+   * Write to the stdin of the process (serialized)
+   */
+  private async _writeToStdin(request: Request): Promise<void> {
+    const stdin = this._process?.stdin;
 
-      throw error;
+    if (!stdin || stdin.destroyed || !this._process) {
+      throw new Error("Sidecar process stdin not available");
     }
+
+    return new Promise((resolve, reject) => {
+      // Add to queue
+      this._writeQueue.push({ request, resolve, reject });
+      this._processQueue();
+    });
+  }
+
+  /**
+   * Process the write queue one at a time
+   */
+  private async _processQueue(): Promise<void> {
+    if (this._isWriting || this._writeQueue.length === 0) {
+      return;
+    }
+
+    this._isWriting = true;
+    const { request, resolve, reject } = this._writeQueue.shift()!;
+
+    try {
+      await this._performWrite(request);
+      resolve();
+    } catch (err) {
+      reject(err as Error);
+    } finally {
+      this._isWriting = false;
+      // Process next item if any
+      if (this._writeQueue.length > 0) {
+        // Use setImmediate to avoid stack overflow with large queues
+        setImmediate(() => this._processQueue());
+      }
+    }
+  }
+
+  /**
+   * Perform actual write with backpressure handling
+   */
+  private _performWrite(request: Request): Promise<void> {
+    const stdin = this._process!.stdin;
+    const protocol = this._requestEncoder.encode(request);
+
+    return new Promise((resolve, reject) => {
+      // Clean up function to remove listeners
+      const cleanup = () => {
+        stdin.removeListener("drain", onDrain);
+        stdin.removeListener("error", onError);
+      };
+
+      const onDrain = () => {
+        cleanup();
+        resolve();
+      };
+
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+
+      try {
+        const canContinue = stdin.write(protocol, (err) => {
+          if (err) {
+            cleanup();
+            reject(err);
+          } else {
+            cleanup();
+            resolve();
+          }
+        });
+
+        if (!canContinue) {
+          // Only add drain listener if we actually need to wait
+          stdin.once("drain", onDrain);
+          stdin.once("error", onError);
+        }
+      } catch (syncErr) {
+        cleanup();
+        reject(syncErr as Error);
+      }
+    });
   }
 
   /**
@@ -862,12 +953,16 @@ export class Logger {
       }
     }
 
-    if (this._options.saveToLogFiles) {
+    if (this._options.saveToLogFiles && this._process) {
       this._writeToStdin({
         id: this._getNextId(),
         level,
         method: method.LOG,
         payload: formattedMessage,
+      }).catch((err) => {
+        process.stderr.write(
+          `Failed to write log to sidecar: ${err.message}\n`,
+        );
       });
     }
   }
@@ -908,10 +1003,36 @@ export class Logger {
   }
 
   /**
-   * Flushes the remaning logs and then closes the side car
+   * Flushes the remaining logs and then closes the side car
    */
-  flush(): Promise<void> {
-    return this._sendRequest(method.FLUSH, "", LogLevel.INFO);
+  async flush(): Promise<void> {
+    try {
+      return await this._sendRequest(method.FLUSH, "", LogLevel.INFO);
+    } finally {
+      this._cleanupProcess();
+    }
+  }
+
+  /**
+   * Clean up the sidecar process
+   */
+  private _cleanupProcess(): void {
+    if (this._process && !this._process.killed) {
+      // Remove listeners to prevent memory leaks
+      this._process.stdout?.removeAllListeners();
+      this._process.stderr?.removeAllListeners();
+      this._process.removeAllListeners();
+
+      // Kill the process
+      this._process.kill("SIGTERM");
+      this._process = null;
+    }
+
+    // Clear any pending requests that might be stuck
+    for (const [id, pending] of this._pending) {
+      pending.rej(new Error("Process closed during flush"));
+      this._pending.delete(id);
+    }
   }
 
   /**
