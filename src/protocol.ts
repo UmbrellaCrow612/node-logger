@@ -24,6 +24,11 @@ export const METHOD = {
 export const VALID_METHODS: Set<number> = new Set(Object.values(METHOD));
 
 /**
+ * What value the method can be for a request
+ */
+export type MethodType = (typeof METHOD)[keyof typeof METHOD];
+
+/**
  * Contains all the levels logs can be indicating there importance
  */
 export const LOG_LEVEL = {
@@ -57,11 +62,6 @@ export const LOG_LEVEL = {
  * Contains a set of valid log levels
  */
 export const VALID_LOG_LEVELS: Set<number> = new Set(Object.values(LOG_LEVEL));
-
-/**
- * What value the method can be for a request
- */
-export type MethodType = (typeof METHOD)[keyof typeof METHOD];
 
 /**
  * What type the level can be for a request
@@ -262,30 +262,26 @@ export class RequestEncoder {
 }
 
 /**
- * Used to encode/decode the response messages to/from the buffer protocol encoding
+ * Used to encode the response messages to the buffer protocol encoding
  */
 export class ResponseEncoder {
-  private static readonly RESPONSE_SIZE = 8;
-  private static readonly MAX_ID = 0xffffffff; // uint32 max
+  private static readonly HEADER_SIZE = 8;
+  private static readonly MAX_ID = 0xffffffff;
+  private validMethods: Set<number>;
+  private validLevels: Set<number>;
 
-  private static readonly VALID_METHODS: Set<number> = new Set([
-    METHOD.LOG,
-    METHOD.FLUSH,
-    METHOD.RELOAD,
-  ]);
-
-  private static readonly VALID_LEVELS: Set<number> = new Set([
-    LOG_LEVEL.INFO,
-    LOG_LEVEL.WARN,
-    LOG_LEVEL.ERROR,
-    LOG_LEVEL.DEBUG,
-    LOG_LEVEL.FATAL,
-  ]);
+  constructor(
+    validMethods: Set<number> = VALID_METHODS,
+    validLevels: Set<number> = VALID_LOG_LEVELS,
+  ) {
+    this.validMethods = validMethods;
+    this.validLevels = validLevels;
+  }
 
   /**
-   * Encode a response message into binary protocol
-   * @param response The response message
-   * @throws {ProtocolError} If response is invalid
+   * Encode a response to the binary protocol
+   * @param response The JSON response object
+   * @returns Binary protocol buffer (exactly 8 bytes)
    */
   encode(response: Response): Buffer {
     if (
@@ -293,90 +289,65 @@ export class ResponseEncoder {
       response.id < 0 ||
       response.id > ResponseEncoder.MAX_ID
     ) {
-      throw new ProtocolError(
-        `ID must be an integer between 0 and ${ResponseEncoder.MAX_ID}, got: ${response.id}`,
-      );
+      throw new ProtocolError(`Invalid ID: ${response.id}`);
+    }
+    if (!this.validMethods.has(response.method)) {
+      throw new ProtocolError(`Invalid method: ${response.method}`);
+    }
+    if (!this.validLevels.has(response.level)) {
+      throw new ProtocolError(`Invalid level: ${response.level}`);
     }
 
-    if (!ResponseEncoder.VALID_METHODS.has(response.method)) {
-      throw new ProtocolError(`Invalid method value: ${response.method}`);
-    }
+    const buffer = Buffer.allocUnsafe(ResponseEncoder.HEADER_SIZE);
 
-    if (!ResponseEncoder.VALID_LEVELS.has(response.level)) {
-      throw new ProtocolError(`Invalid level value: ${response.level}`);
-    }
-
-    const buffer = Buffer.allocUnsafe(ResponseEncoder.RESPONSE_SIZE);
-
-    // Write ID (uint32, big-endian) at offset 0
     buffer.writeUInt32BE(response.id, 0);
-
-    // Write method at offset 4
     buffer[4] = response.method;
-
-    // Write level at offset 5
     buffer[5] = response.level;
-
-    // Write success flag at offset 6 (0x01 for true, 0x00 for false)
-    buffer[6] = response.success ? 0x01 : 0x00;
-
-    // Reserved byte at offset 7 (zero-filled)
-    buffer[7] = 0x00;
+    buffer[6] = response.success ? 1 : 0;
+    buffer[7] = 0x00; // reserved padding
 
     return buffer;
   }
 
   /**
-   * Decode a response binary protocol back into a response object
-   * @param binaryResponse The response which was encoded using the protocol
-   * @throws {ProtocolError} If buffer is malformed or contains invalid data
+   * Decode a binary protocol buffer to a response object
+   * @param buffer The binary protocol buffer
+   * @returns The decoded response object
    */
-  decode(binaryResponse: Buffer): Response {
-    if (binaryResponse.length < ResponseEncoder.RESPONSE_SIZE) {
+  decode(buffer: Buffer): Response {
+    if (buffer.length !== ResponseEncoder.HEADER_SIZE) {
       throw new ProtocolError(
-        `Buffer too small: ${binaryResponse.length} bytes (minimum: ${ResponseEncoder.RESPONSE_SIZE})`,
+        `Invalid buffer size: expected ${ResponseEncoder.HEADER_SIZE} bytes, got ${buffer.length} bytes`,
       );
     }
 
-    // Read ID (uint32, big-endian) from offset 0
-    const id = binaryResponse.readUInt32BE(0);
+    const id = buffer.readUInt32BE(0);
+    const method = buffer[4] as number;
+    const level = buffer[5] as number;
+    const success = buffer[6] === 1;
 
-    // Read method from offset 4
-    const methodValue = binaryResponse[4] as number;
-    if (!ResponseEncoder.VALID_METHODS.has(methodValue)) {
-      throw new ProtocolError(`Invalid method value in buffer: ${methodValue}`);
-    }
-    const method = methodValue as MethodType;
-
-    // Read level from offset 5
-    const levelValue = binaryResponse[5] as number;
-    if (!ResponseEncoder.VALID_LEVELS.has(levelValue)) {
-      throw new ProtocolError(`Invalid level value in buffer: ${levelValue}`);
-    }
-    const level = levelValue as LogLevelType;
-
-    // Read success flag from offset 6
-    const successByte = binaryResponse[6] as number;
-    if (successByte !== 0x00 && successByte !== 0x01) {
+    if (buffer[7] !== 0x00) {
       throw new ProtocolError(
-        `Invalid success flag value: ${successByte} (expected 0x00 or 0x01)`,
+        `Invalid reserved byte: expected 0x00, got 0x${buffer[7]?.toString(16).padStart(2, "0")}`,
       );
     }
-    const success = successByte === 0x01;
 
-    // Warn if buffer has extra bytes (optional strictness)
-    if (binaryResponse.length > ResponseEncoder.RESPONSE_SIZE) {
-      // Could throw here if strict mode is desired
-      // For now, we'll just ignore trailing bytes
+    if (!this.validMethods.has(method)) {
+      throw new ProtocolError(`Invalid method: ${method}`);
+    }
+    if (!this.validLevels.has(level)) {
+      throw new ProtocolError(`Invalid level: ${level}`);
     }
 
-    return { id, method, level, success };
+    return {
+      id,
+      method: method as MethodType,
+      level: level as LogLevelType,
+      success,
+    };
   }
 
-  /**
-   * Get the fixed size of a response message
-   */
-  static getResponseSize(): number {
-    return ResponseEncoder.RESPONSE_SIZE;
+  static getHeaderSize(): number {
+    return ResponseEncoder.HEADER_SIZE;
   }
 }

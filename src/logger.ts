@@ -380,7 +380,7 @@ export class Logger {
     // Append new data to buffer
     this._responseBuffer = Buffer.concat([this._responseBuffer, data]);
 
-    const responseSize = ResponseEncoder.getResponseSize();
+    const responseSize = 8
 
     // Process complete responses while we have enough data
     while (this._responseBuffer.length >= responseSize) {
