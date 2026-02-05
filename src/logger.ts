@@ -71,6 +71,42 @@ export type LoggerOptions = {
    * Map a specific log level with a string value use for it
    */
   logLevelMap: Record<LogLevelType, string>;
+
+  /**
+   * Minimum log level to process (filters out lower levels)
+   */
+  minLevel?: LogLevelType;
+
+  /**
+   * Maximum log level to process (filters out higher levels)
+   */
+  maxLevel?: LogLevelType;
+
+  /**
+   * Specific levels to include (whitelist)
+   */
+  includeLevels?: LogLevelType[];
+
+  /**
+   * Specific levels to exclude (blacklist)
+   */
+  excludeLevels?: LogLevelType[];
+
+  /**
+   * Filter function to determine if a log should be processed
+   */
+  filter?: (level: LogLevelType, message: any) => boolean;
+};
+
+/**
+ * Numeric priority for log levels (higher = more severe)
+ */
+const LogLevelPriority: Record<LogLevelType, number> = {
+  [LogLevel.DEBUG]: 0,
+  [LogLevel.INFO]: 1,
+  [LogLevel.WARN]: 2,
+  [LogLevel.ERROR]: 3,
+  [LogLevel.FATAL]: 4,
 };
 
 // ANSI color codes
@@ -194,6 +230,50 @@ export class Logger {
     }
 
     this._verifyWritable();
+  }
+
+  /**
+   * Check if a log level should be processed based on filtering rules
+   */
+  private _shouldLog(level: LogLevelType): boolean {
+    const { minLevel, maxLevel, includeLevels, excludeLevels, filter } =
+      this._options;
+
+    // Check whitelist (if specified, only these levels pass)
+    if (includeLevels && includeLevels.length > 0) {
+      if (!includeLevels.includes(level)) {
+        return false;
+      }
+    }
+
+    // Check blacklist
+    if (excludeLevels && excludeLevels.length > 0) {
+      if (excludeLevels.includes(level)) {
+        return false;
+      }
+    }
+
+    // Check min level (filter out lower severity)
+    if (minLevel !== undefined) {
+      if (LogLevelPriority[level] < LogLevelPriority[minLevel]) {
+        return false;
+      }
+    }
+
+    // Check max level (filter out higher severity)
+    if (maxLevel !== undefined) {
+      if (LogLevelPriority[level] > LogLevelPriority[maxLevel]) {
+        return false;
+      }
+    }
+
+    // Check custom filter function
+    if (filter) {
+      // Note: filter function is checked in log() with message available
+      return true; // Defer to log() method for filter check
+    }
+
+    return true;
   }
 
   /**
@@ -441,6 +521,21 @@ export class Logger {
    * @param messages Any addtional messages
    */
   log(level: LogLevelType, message: any, ...messages: any[]): void {
+    if (!this._shouldLog(level)) {
+      return;
+    }
+
+    if (this._options.filter) {
+      const fullMessage =
+        messages.length > 0
+          ? [message, ...messages].map((m) => this._stringify(m)).join(" ")
+          : this._stringify(message);
+
+      if (!this._options.filter(level, fullMessage)) {
+        return;
+      }
+    }
+
     const formattedMessage = this._formatMessage(level, message, messages);
 
     if (this._options.outputToConsole) {
