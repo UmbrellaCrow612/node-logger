@@ -211,6 +211,10 @@ export class Logger {
     resolve: () => void;
     reject: (err: Error) => void;
   }> = [];
+
+  /**
+   * If it is writing to the process
+   */
   private _isWriting = false;
 
   /**
@@ -411,6 +415,9 @@ export class Logger {
 
     if (!pending) {
       // No pending request for this ID - might be a late response or unknown ID
+      process.stderr.write(
+        `recived a response for non pending request ${response.id}`,
+      );
       return;
     }
 
@@ -671,7 +678,6 @@ export class Logger {
     }
 
     return new Promise((resolve, reject) => {
-      // Add to queue
       this._writeQueue.push({ request, resolve, reject });
       this._processQueue();
     });

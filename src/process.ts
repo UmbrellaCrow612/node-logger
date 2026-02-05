@@ -7,10 +7,10 @@ import path from "node:path";
 import {
   method,
   Request,
-  RequestEncoder,
   Response,
   ResponseEncoder,
   ProtocolError,
+  LogLevel,
 } from "./protocol";
 
 // Configuration
@@ -27,7 +27,6 @@ let currentFileSize = 0;
 let isClosing = false;
 
 // Encoders
-const requestEncoder = new RequestEncoder();
 const responseEncoder = new ResponseEncoder();
 
 /**
@@ -196,10 +195,22 @@ function processRequest(basePath: string, request: Request): void {
 
       case method.FLUSH:
         handleFlush(basePath);
+        sendResponse({
+          id: request.id,
+          method: request.method,
+          level: request.level,
+          success,
+        });
         break;
 
       case method.RELOAD:
         handleReload(basePath);
+        sendResponse({
+          id: request.id,
+          method: request.method,
+          level: request.level,
+          success,
+        });
         break;
 
       default:
@@ -210,14 +221,6 @@ function processRequest(basePath: string, request: Request): void {
     success = false;
     process.stderr.write(`Request error: ${(err as Error).message}\n`);
   }
-
-  // Send response back
-  sendResponse({
-    id: request.id,
-    method: request.method,
-    level: request.level,
-    success,
-  });
 }
 
 /**
@@ -230,7 +233,7 @@ async function main() {
 
   // Buffer for accumulating binary data
   let buffer = Buffer.alloc(0);
-  const headerSize = RequestEncoder.getRequestSize(); // Request header size
+  const headerSize = 8
 
   // Handle stdin data
   process.stdin.on("data", (data: Buffer) => {
@@ -250,15 +253,13 @@ async function main() {
         }
 
         // Now decode the complete message
-        const request = requestEncoder.decode(
-          buffer.subarray(0, fullMessageSize),
-        );
+        
 
         // Remove processed bytes
         buffer = buffer.subarray(fullMessageSize);
 
         // Process the request
-        processRequest(basePath, request);
+        processRequest(basePath, {id: 1, level: LogLevel.DEBUG, payload: "", method: method.FLUSH });
       } catch (err) {
         if (err instanceof ProtocolError) {
           process.stderr.write(`Protocol error: ${(err as Error).message}\n`);

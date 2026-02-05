@@ -19,34 +19,44 @@ export const method = {
 } as const;
 
 /**
+ * Contains a set of valid methods
+ */
+export const VALID_METHODS: Set<number> = new Set(Object.values(method));
+
+/**
  * Contains all the levels logs can be indicating there importance
  */
 export const LogLevel = {
   /**
    * Used for information
    */
-  INFO: 0x00,
+  INFO: 0x01,
 
   /**
    * Used for warning
    */
-  WARN: 0x01,
+  WARN: 0x02,
 
   /**
    * Used for errors
    */
-  ERROR: 0x02,
+  ERROR: 0x03,
 
   /**
    * Used for debug
    */
-  DEBUG: 0x03,
+  DEBUG: 0x04,
 
   /**
    * Used for fatal
    */
-  FATAL: 0x04,
+  FATAL: 0x05,
 } as const;
+
+/**
+ * Contains a set of valid log levels
+ */
+export const VALID_LOG_LEVELS: Set<number> = new Set(Object.values(LogLevel));
 
 /**
  * What value the method can be for a request
@@ -61,41 +71,40 @@ export type LogLevelType = (typeof LogLevel)[keyof typeof LogLevel];
 /**
  * Represents a request message object used to send messages to the log stream.
  *
- * This will then be mapped to our binary protocol:
- *
- * Binary Protocol for Log Streaming (Big-Endian / Network Byte Order):
+ * Serialized to the following binary protocol (Big-Endian / Network Byte Order):
  *
  * ```
- * Format:
+ * | Offset | Size   | Field          | Description                    |
+ * |--------|--------|----------------|--------------------------------|
+ * | 0-3    | 4 bytes| id             | uint32, 0 to 4,294,967,295     |
+ * | 4      | 1 byte | method         | uint8, enum value              |
+ * | 5      | 1 byte | level          | uint8, enum value              |
+ * | 6-7    | 2 bytes| payload_length | uint16, 0 to 65,535            |
+ * | 8+     | N bytes| payload        | UTF-8 encoded string data      |
  *
- * [0-3]   : ID (uint32, 4 bytes, big-endian)
- * [4]     : Method (1 byte)
- * [5]     : Level (1 byte)
- * [6-7]   : Payload length (uint16, 2 bytes, big-endian)
- * [8...]  : Payload (UTF-8 encoded string)
+ * Total header: 8 bytes
+ * Maximum total size: 65,543 bytes (8 + 65,535)
  * ```
- *
- * Total header size: 8 bytes
- * Maximum payload size: 65,535 bytes (uint16 max)
  */
 export type Request = {
   /**
-   * A way to ID this request (0 to 4,294,967,295)
+   * Request identifier (0 to 4,294,967,295)
    */
   id: number;
 
   /**
-   * What method this request is
+   * Operation method (e.g., LOG, FLUSH, RELOAD)
    */
   method: MethodType;
 
   /**
-   * What level of log this is
+   * Log severity level (e.g., INFO, WARN, ERROR)
    */
   level: LogLevelType;
 
   /**
-   * Any string (max 65,535 bytes when UTF-8 encoded)
+   * Message payload. Max 65,535 bytes when UTF-8 encoded.
+   * Multi-byte characters (emoji, non-ASCII) count as multiple bytes.
    */
   payload: string;
 };
@@ -156,27 +165,23 @@ export class ProtocolError extends Error {
  */
 export class RequestEncoder {
   private static readonly HEADER_SIZE = 8;
-  private static readonly MAX_ID = 0xffffffff; // uint32 max
-  private static readonly MAX_PAYLOAD_LENGTH = 0xffff; // uint16 max
+  private static readonly MAX_ID = 0xffffffff;
+  private static readonly MAX_PAYLOAD_LENGTH = 0xffff;
+  private validMethods: Set<number>;
+  private validLevels: Set<number>;
 
-  private static readonly VALID_METHODS: Set<number> = new Set([
-    method.LOG,
-    method.FLUSH,
-    method.RELOAD,
-  ]);
-
-  private static readonly VALID_LEVELS: Set<number> = new Set([
-    LogLevel.INFO,
-    LogLevel.WARN,
-    LogLevel.ERROR,
-    LogLevel.DEBUG,
-    LogLevel.FATAL,
-  ]);
+  constructor(
+    validMethods: Set<number> = VALID_METHODS,
+    validLevels: Set<number> = VALID_LOG_LEVELS,
+  ) {
+    this.validMethods = validMethods;
+    this.validLevels = validLevels;
+  }
 
   /**
-   * Encode a request message into binary protocol
-   * @param request The request message
-   * @throws {ProtocolError} If request is invalid
+   * Encode a request to the binary protocol
+   * @param request The JSON request object
+   * @returns Binary protocol of the request
    */
   encode(request: Request): Buffer {
     if (
@@ -184,24 +189,19 @@ export class RequestEncoder {
       request.id < 0 ||
       request.id > RequestEncoder.MAX_ID
     ) {
-      throw new ProtocolError(
-        `ID must be an integer between 0 and ${RequestEncoder.MAX_ID}, got: ${request.id}`,
-      );
+      throw new ProtocolError(`Invalid ID: ${request.id}`);
     }
-
-    if (!RequestEncoder.VALID_METHODS.has(request.method)) {
-      throw new ProtocolError(`Invalid method value: ${request.method}`);
+    if (!this.validMethods.has(request.method)) {
+      throw new ProtocolError(`Invalid method: ${request.method}`);
     }
-
-    if (!RequestEncoder.VALID_LEVELS.has(request.level)) {
-      throw new ProtocolError(`Invalid level value: ${request.level}`);
+    if (!this.validLevels.has(request.level)) {
+      throw new ProtocolError(`Invalid level: ${request.level}`);
     }
 
     const payloadBytes = Buffer.from(request.payload, "utf-8");
-
     if (payloadBytes.length > RequestEncoder.MAX_PAYLOAD_LENGTH) {
       throw new ProtocolError(
-        `Payload too large: ${payloadBytes.length} bytes (max: ${RequestEncoder.MAX_PAYLOAD_LENGTH})`,
+        `Payload too large: ${payloadBytes.length} bytes`,
       );
     }
 
@@ -209,80 +209,16 @@ export class RequestEncoder {
       RequestEncoder.HEADER_SIZE + payloadBytes.length,
     );
 
-    // Write ID (uint32, big-endian) at offset 0
     buffer.writeUInt32BE(request.id, 0);
-
-    // Write method at offset 4
     buffer[4] = request.method;
-
-    // Write level at offset 5
     buffer[5] = request.level;
-
-    // Write payload length (uint16, big-endian) at offset 6
     buffer.writeUInt16BE(payloadBytes.length, 6);
-
-    // Copy payload starting at offset 8
     payloadBytes.copy(buffer, 8);
 
     return buffer;
   }
 
-  /**
-   * Decode a request binary protocol back into a request object
-   * @param binaryRequest The request which was encoded using the protocol
-   * @throws {ProtocolError} If buffer is malformed or contains invalid data
-   */
-  decode(binaryRequest: Buffer): Request {
-    if (binaryRequest.length < RequestEncoder.HEADER_SIZE) {
-      throw new ProtocolError(
-        `Buffer too small: ${binaryRequest.length} bytes (minimum: ${RequestEncoder.HEADER_SIZE})`,
-      );
-    }
-
-    // Read ID (uint32, big-endian) from offset 0
-    const id = binaryRequest.readUInt32BE(0);
-
-    // Read method from offset 4
-    const methodValue = binaryRequest[4] as number;
-    if (!RequestEncoder.VALID_METHODS.has(methodValue)) {
-      throw new ProtocolError(`Invalid method value in buffer: ${methodValue}`);
-    }
-    const method = methodValue as MethodType;
-
-    // Read level from offset 5
-    const levelValue = binaryRequest[5] as number;
-    if (!RequestEncoder.VALID_LEVELS.has(levelValue)) {
-      throw new ProtocolError(`Invalid level value in buffer: ${levelValue}`);
-    }
-    const level = levelValue as LogLevelType;
-
-    // Read payload length (uint16, big-endian) from offset 6
-    const payloadLength = binaryRequest.readUInt16BE(6);
-
-    // Validate actual buffer size matches declared payload length
-    const expectedLength = RequestEncoder.HEADER_SIZE + payloadLength;
-    if (binaryRequest.length < expectedLength) {
-      throw new ProtocolError(
-        `Buffer truncated: expected ${expectedLength} bytes, got ${binaryRequest.length}`,
-      );
-    }
-
-    // Warn if buffer has extra bytes (optional strictness)
-    if (binaryRequest.length > expectedLength) {
-      // Could throw here if strict mode is desired
-      // For now, we'll just ignore trailing bytes
-    }
-
-    // Extract and decode payload from offset 8
-    const payload = binaryRequest.toString("utf-8", 8, 8 + payloadLength);
-
-    return { id, method, level, payload };
-  }
-
-  /**
-   * Get the fixed size of a response message
-   */
-  static getRequestSize(): number {
+  static getHeaderSize(): number {
     return RequestEncoder.HEADER_SIZE;
   }
 }
