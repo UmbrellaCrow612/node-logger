@@ -112,40 +112,38 @@ export type Request = {
 /**
  * Represents a response message object used to send responses from the log stream.
  *
- * This will then be mapped to our binary protocol:
- *
- * Binary Protocol for Response (Big-Endian / Network Byte Order):
+ * Serialized to the following binary protocol (Big-Endian / Network Byte Order):
  *
  * ```
- * Format:
- *
- * [0-3]   : ID (uint32, 4 bytes, big-endian)
- * [4]     : Method (1 byte)
- * [5]     : Level (1 byte)
- * [6]     : Success (1 byte, 0x00 = false, 0x01 = true)
- * [7]     : Reserved (1 byte, padding for alignment)
- * ```
+ * | Offset | Size   | Field   | Description                    |
+ * |--------|--------|---------|--------------------------------|
+ * | 0-3    | 4 bytes| id      | uint32, 0 to 4,294,967,295     |
+ * | 4      | 1 byte | method  | uint8, enum value              |
+ * | 5      | 1 byte | level   | uint8, enum value              |
+ * | 6      | 1 byte | success | uint8, 0 = false, 1 = true     |
+ * | 7      | 1 byte | reserved| padding (set to 0x00)          |
  *
  * Total size: 8 bytes fixed
+ * ```
  */
 export type Response = {
   /**
-   * The specific request it was for (0 to 4,294,967,295)
+   * Request identifier (0 to 4,294,967,295)
    */
   id: number;
 
   /**
-   * What method this request was
+   * Operation method (e.g., LOG, FLUSH, RELOAD)
    */
   method: MethodType;
 
   /**
-   * What log level it was
+   * Log severity level (e.g., INFO, WARN, ERROR)
    */
   level: LogLevelType;
 
   /**
-   * If the request succeeded or failed
+   * Whether the request succeeded (true) or failed (false)
    */
   success: boolean;
 };
