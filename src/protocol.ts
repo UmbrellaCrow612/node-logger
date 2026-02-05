@@ -81,6 +81,10 @@ export = {
   encode,
 };
 
+
+/**
+ * Contains protocol types
+ */
 declare namespace Protocol {
   /**
    * What value the method can be for a request
