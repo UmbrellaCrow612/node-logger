@@ -278,6 +278,13 @@ export class RequestEncoder {
 
     return { id, method, level, payload };
   }
+
+  /**
+   * Get the fixed size of a response message
+   */
+  static getRequestSize(): number {
+    return RequestEncoder.HEADER_SIZE;
+  }
 }
 
 /**

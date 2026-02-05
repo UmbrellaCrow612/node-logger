@@ -400,9 +400,6 @@ export class Logger {
 
     if (!pending) {
       // No pending request for this ID - might be a late response or unknown ID
-      process.stderr.write(
-        `Received response for unknown request ID: ${response.id}\n`,
-      );
       return;
     }
 
@@ -631,6 +628,7 @@ export class Logger {
           this._pending.delete(id);
         }
       }, 5000);
+
       this._pending.set(id, {
         res: (value) => {
           clearTimeout(timeout);
@@ -864,7 +862,12 @@ export class Logger {
     }
 
     if (this._options.saveToLogFiles) {
-      // TODO: Implement file logging
+      this._writeToStdin({
+        id: this._getId(),
+        level,
+        method: method.LOG,
+        payload: formattedMessage,
+      });
     }
   }
 
