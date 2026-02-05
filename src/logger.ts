@@ -8,6 +8,7 @@ import {
   Request,
   RequestEncoder,
   ResponseEncoder,
+  Response, // Import Response type
 } from "./protocol";
 import os from "node:os";
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
@@ -230,9 +231,14 @@ export class Logger {
   private _requestEncoder: RequestEncoder = new RequestEncoder();
 
   /**
-   * Used to map responses to binary protocol
+   * Used to map responses from binary protocol
    */
-  private _responseEncode: ResponseEncoder = new ResponseEncoder();
+  private _responseEncoder: ResponseEncoder = new ResponseEncoder();
+
+  /**
+   * Buffer for accumulating response data (handles partial reads)
+   */
+  private _responseBuffer: Buffer = Buffer.alloc(0);
 
   constructor(options: Partial<LoggerOptions> = {}) {
     const mergedColorMap = {
@@ -304,7 +310,7 @@ export class Logger {
   }
 
   /**
-   * Spawns the side car process
+   * Spawns the side car process and sets up stdout listener
    */
   private _initializeProcess() {
     if (!this._options.saveToLogFiles) {
@@ -317,6 +323,11 @@ export class Logger {
       this._process = spawn("node", [processPath], {
         stdio: ["pipe", "pipe", "pipe"],
         detached: false,
+      });
+
+      // Set up stdout data handler for response decoding
+      this._process.stdout?.on("data", (data: Buffer) => {
+        this._handleResponseData(data);
       });
 
       this._process.on("error", (error) => {
@@ -343,6 +354,69 @@ export class Logger {
 
       throw new LoggerInitializationError(
         `Failed to create side car process: ${nodeError.message}`,
+      );
+    }
+  }
+
+  /**
+   * Handle incoming data from sidecar stdout, decode responses and resolve pending requests
+   */
+  private _handleResponseData(data: Buffer): void {
+    // Append new data to buffer
+    this._responseBuffer = Buffer.concat([this._responseBuffer, data]);
+
+    const responseSize = ResponseEncoder.getResponseSize();
+
+    // Process complete responses while we have enough data
+    while (this._responseBuffer.length >= responseSize) {
+      try {
+        // Extract exactly one response (first 8 bytes)
+        const responseBytes = this._responseBuffer.subarray(0, responseSize);
+
+        // Decode the response
+        const response: Response = this._responseEncoder.decode(responseBytes);
+
+        // Remove processed bytes from buffer
+        this._responseBuffer = this._responseBuffer.subarray(responseSize);
+
+        // Resolve the corresponding pending request
+        this._resolvePendingRequest(response);
+      } catch (error) {
+        // If decoding fails, log error and clear buffer to prevent infinite loop
+        const err = error as Error;
+        process.stderr.write(`Failed to decode response: ${err.message}\n`);
+
+        // Remove one byte and try again (resync mechanism)
+        this._responseBuffer = this._responseBuffer.subarray(1);
+      }
+    }
+  }
+
+  /**
+   * Resolve a pending request based on the decoded response
+   */
+  private _resolvePendingRequest(response: Response): void {
+    const pending = this._pending.get(response.id);
+
+    if (!pending) {
+      // No pending request for this ID - might be a late response or unknown ID
+      process.stderr.write(
+        `Received response for unknown request ID: ${response.id}\n`,
+      );
+      return;
+    }
+
+    // Remove from pending map
+    this._pending.delete(response.id);
+
+    // Resolve or reject based on success flag
+    if (response.success) {
+      pending.res();
+    } else {
+      pending.rej(
+        new Error(
+          `Request ${response.id} failed (method: ${response.method}, level: ${response.level})`,
+        ),
       );
     }
   }
