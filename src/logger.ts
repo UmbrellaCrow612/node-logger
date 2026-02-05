@@ -3,6 +3,21 @@ import path from "node:path";
 import { LogLevel, LogLevelType } from "./protocol";
 
 /**
+ * Timestamp format options
+ */
+export type TimestampType =
+  | "iso" // ISO 8601: 2024-01-15T10:30:00.000Z
+  | "locale" // Locale string: 1/15/2024, 10:30:00 AM
+  | "utc" // UTC string: Mon, 15 Jan 2024 10:30:00 GMT
+  | "unix" // Unix timestamp (seconds): 1705317000
+  | "unix_ms" // Unix timestamp (milliseconds): 1705317000000
+  | "date" // Date only: 2024-01-15
+  | "time" // Time only: 10:30:00
+  | "datetime" // Date and time: 2024-01-15 10:30:00
+  | "short" // Short format: 15/01/2024 10:30
+  | "custom"; // Custom format (requires customTimestampFormat)
+
+/**
  * Options to change the logger
  */
 export type LoggerOptions = {
@@ -35,6 +50,17 @@ export type LoggerOptions = {
    * If it should add timestamps to logs
    */
   showTimeStamps: boolean;
+
+  /**
+   * Which timestamp format to use (only applies when showTimeStamps is true)
+   */
+  timestampType: TimestampType;
+
+  /**
+   * Custom timestamp format string (only used when timestampType is "custom")
+   * Use tokens: YYYY=year, MM=month, DD=day, HH=hour, mm=minute, ss=second, ms=millisecond
+   */
+  customTimestampFormat?: string;
 
   /**
    * If it should show log level
@@ -75,6 +101,7 @@ const defaultLoggerOptions: LoggerOptions = {
     [LogLevel.FATAL]: Colors.magenta,
   },
   showTimeStamps: true,
+  timestampType: "iso",
   showLogLevel: true,
   logLevelMap: {
     [LogLevel.INFO]: "INFO",
@@ -194,6 +221,78 @@ export class Logger {
   }
 
   /**
+   * Format timestamp based on the configured timestampType
+   */
+  private _formatTimestamp(date: Date): string {
+    const { timestampType, customTimestampFormat } = this._options;
+
+    switch (timestampType) {
+      case "iso":
+        return date.toISOString();
+
+      case "locale":
+        return date.toLocaleString();
+
+      case "utc":
+        return date.toUTCString();
+
+      case "unix":
+        return Math.floor(date.getTime() / 1000).toString();
+
+      case "unix_ms":
+        return date.getTime().toString();
+
+      case "date":
+        return date.toISOString().split("T")[0] as string;
+
+      case "time":
+        return date.toTimeString().split(" ")[0] as string;
+
+      case "datetime":
+        return date.toISOString().replace("T", " ").replace("Z", "");
+
+      case "short":
+        const d = date;
+        const day = d.getDate().toString().padStart(2, "0");
+        const month = (d.getMonth() + 1).toString().padStart(2, "0");
+        const year = d.getFullYear();
+        const hours = d.getHours().toString().padStart(2, "0");
+        const minutes = d.getMinutes().toString().padStart(2, "0");
+        return `${day}/${month}/${year} ${hours}:${minutes}`;
+
+      case "custom":
+        if (!customTimestampFormat) {
+          return date.toISOString();
+        }
+        return this._applyCustomFormat(date, customTimestampFormat);
+
+      default:
+        return date.toISOString();
+    }
+  }
+
+  /**
+   * Apply custom format string to date
+   * Tokens: YYYY=year, MM=month, DD=day, HH=hour, mm=minute, ss=second, ms=millisecond
+   */
+  private _applyCustomFormat(date: Date, format: string): string {
+    const tokens: Record<string, string> = {
+      YYYY: date.getFullYear().toString(),
+      MM: (date.getMonth() + 1).toString().padStart(2, "0"),
+      DD: date.getDate().toString().padStart(2, "0"),
+      HH: date.getHours().toString().padStart(2, "0"),
+      mm: date.getMinutes().toString().padStart(2, "0"),
+      ss: date.getSeconds().toString().padStart(2, "0"),
+      ms: date.getMilliseconds().toString().padStart(3, "0"),
+    };
+
+    return format.replace(
+      /YYYY|MM|DD|HH|mm|ss|ms/g,
+      (match) => tokens[match] || match,
+    );
+  }
+
+  /**
    * Convert any value to string representation
    */
   private _stringify(value: any): string {
@@ -282,7 +381,7 @@ export class Logger {
 
     // Add timestamp if enabled
     if (this._options.showTimeStamps) {
-      const timestamp = new Date().toISOString();
+      const timestamp = this._formatTimestamp(new Date());
       parts.push(`[${timestamp}]`);
     }
 
