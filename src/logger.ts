@@ -40,6 +40,11 @@ export type LoggerOptions = {
    * If it should show log level
    */
   showLogLevel: boolean;
+
+  /**
+   * Map a specific log level with a string value use for it
+   */
+  logLevelMap: Record<LogLevelType, string>;
 };
 
 // ANSI color codes
@@ -71,6 +76,13 @@ const defaultLoggerOptions: LoggerOptions = {
   },
   showTimeStamps: true,
   showLogLevel: true,
+  logLevelMap: {
+    [LogLevel.INFO]: "INFO",
+    [LogLevel.WARN]: "WARN",
+    [LogLevel.ERROR]: "ERROR",
+    [LogLevel.DEBUG]: "DEBUG",
+    [LogLevel.FATAL]: "FATAL",
+  },
 };
 
 /**
@@ -95,10 +107,16 @@ export class Logger {
       ...options.colorMap,
     };
 
+    const mergedLogLevelMap = {
+      ...defaultLoggerOptions.logLevelMap,
+      ...options.logLevelMap,
+    };
+
     this._options = {
       ...defaultLoggerOptions,
       ...options,
       colorMap: mergedColorMap,
+      logLevelMap: mergedLogLevelMap,
     };
 
     this._validateBasePath();
@@ -172,20 +190,7 @@ export class Logger {
    * Get the string representation of a log level
    */
   private _getLevelString(level: LogLevelType): string {
-    switch (level) {
-      case LogLevel.INFO:
-        return "INFO";
-      case LogLevel.WARN:
-        return "WARN";
-      case LogLevel.ERROR:
-        return "ERROR";
-      case LogLevel.DEBUG:
-        return "DEBUG";
-      case LogLevel.FATAL:
-        return "FATAL";
-      default:
-        return "UNKNOWN";
-    }
+    return this._options.logLevelMap[level] ?? "UNKNOWN"
   }
 
   /**
@@ -228,8 +233,10 @@ export class Logger {
 
     // Build the message content
     const mainMessage = this._stringify(message);
-    const additionalStr = additionalMessages.map((msg) => this._stringify(msg)).join(" ");
-    
+    const additionalStr = additionalMessages
+      .map((msg) => this._stringify(msg))
+      .join(" ");
+
     const fullMessage = additionalStr
       ? `${mainMessage} ${additionalStr}`
       : mainMessage;
@@ -251,7 +258,7 @@ export class Logger {
     }
 
     const color = this._options.colorMap[level] || Colors.reset;
-    
+
     // If we have timestamp/level prefix, color only those parts
     if (this._options.showTimeStamps || this._options.showLogLevel) {
       // Find where the actual message starts (after ": ")
@@ -262,7 +269,7 @@ export class Logger {
         return `${color}${prefix}${Colors.reset}: ${content}`;
       }
     }
-    
+
     // Otherwise color the whole message
     return `${color}${message}${Colors.reset}`;
   }
