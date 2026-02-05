@@ -30,6 +30,16 @@ export type LoggerOptions = {
    * Map of specific log level and what color to use
    */
   colorMap: Record<LogLevelType, string>;
+
+  /**
+   * If it should add timestamps to logs
+   */
+  showTimeStamps: boolean;
+
+  /**
+   * If it should show log level
+   */
+  showLogLevel: boolean;
 };
 
 // ANSI color codes
@@ -59,6 +69,8 @@ const defaultLoggerOptions: LoggerOptions = {
     [LogLevel.DEBUG]: Colors.gray,
     [LogLevel.FATAL]: Colors.magenta,
   },
+  showTimeStamps: true,
+  showLogLevel: true,
 };
 
 /**
@@ -177,36 +189,61 @@ export class Logger {
   }
 
   /**
-   * Format a log message with timestamp and level
+   * Convert any value to string representation
+   */
+  private _stringify(value: any): string {
+    if (value === null) return "null";
+    if (value === undefined) return "undefined";
+    if (typeof value === "object") {
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return "[Circular Object]";
+      }
+    }
+    return String(value);
+  }
+
+  /**
+   * Format a log message with optional timestamp and level
    */
   private _formatMessage(
     level: LogLevelType,
     message: any,
     additionalMessages: any[],
   ): string {
-    const timestamp = new Date().toISOString();
-    const levelStr = this._getLevelString(level);
+    const parts: string[] = [];
 
-    const mainMessage =
-      typeof message === "object"
-        ? JSON.stringify(message, null, 2)
-        : String(message);
+    // Add timestamp if enabled
+    if (this._options.showTimeStamps) {
+      const timestamp = new Date().toISOString();
+      parts.push(`[${timestamp}]`);
+    }
 
-    const additionalStr = additionalMessages
-      .map((msg) =>
-        typeof msg === "object" ? JSON.stringify(msg, null, 2) : String(msg),
-      )
-      .join(" ");
+    // Add log level if enabled
+    if (this._options.showLogLevel) {
+      const levelStr = this._getLevelString(level);
+      parts.push(`[${levelStr}]`);
+    }
 
+    // Build the message content
+    const mainMessage = this._stringify(message);
+    const additionalStr = additionalMessages.map((msg) => this._stringify(msg)).join(" ");
+    
     const fullMessage = additionalStr
       ? `${mainMessage} ${additionalStr}`
       : mainMessage;
 
-    return `[${timestamp}] [${levelStr}]: ${fullMessage}`;
+    // Combine parts with message
+    if (parts.length > 0) {
+      return `${parts.join(" ")}: ${fullMessage}`;
+    } else {
+      return fullMessage;
+    }
   }
 
   /**
-   * Apply color to a message if colored output is enabled
+   * Apply color to specific parts of the message if colored output is enabled
    */
   private _colorize(level: LogLevelType, message: string): string {
     if (!this._options.useColoredOutput) {
@@ -214,6 +251,19 @@ export class Logger {
     }
 
     const color = this._options.colorMap[level] || Colors.reset;
+    
+    // If we have timestamp/level prefix, color only those parts
+    if (this._options.showTimeStamps || this._options.showLogLevel) {
+      // Find where the actual message starts (after ": ")
+      const separatorIndex = message.indexOf(": ");
+      if (separatorIndex !== -1) {
+        const prefix = message.slice(0, separatorIndex);
+        const content = message.slice(separatorIndex + 2);
+        return `${color}${prefix}${Colors.reset}: ${content}`;
+      }
+    }
+    
+    // Otherwise color the whole message
     return `${color}${message}${Colors.reset}`;
   }
 
