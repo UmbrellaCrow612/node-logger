@@ -1,7 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { LogLevel, LogLevelType } from "./protocol";
+import {
+  LogLevel,
+  LogLevelType,
+  method,
+  MethodType,
+  Request,
+  RequestEncoder,
+  ResponseEncoder,
+} from "./protocol";
 import os from "node:os";
+import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 
 /**
  * Timestamp format options
@@ -183,7 +192,47 @@ export class LoggerInitializationError extends Error {
  * Used to log to console and also the log files
  */
 export class Logger {
+  /**
+   * Local refrence to options passed
+   */
   private _options: LoggerOptions;
+
+  /**
+   * Spawned side car
+   */
+  private _process: ChildProcessWithoutNullStreams | null = null;
+
+  /**
+   * Id tracker
+   */
+  private _id = 0;
+
+  /**
+   * Get the next ID
+   * @returns ID
+   */
+  private _getId = () => this._id++;
+
+  /**
+   * Maps specific request id's to there promise's made
+   */
+  private _pending: Map<
+    number,
+    {
+      res: (value: void | PromiseLike<void>) => void;
+      rej: (reason?: any) => void;
+    }
+  > = new Map();
+
+  /**
+   * Used to map request to binary protocol
+   */
+  private _requestEncoder: RequestEncoder = new RequestEncoder();
+
+  /**
+   * Used to map responses to binary protocol
+   */
+  private _responseEncode: ResponseEncoder = new ResponseEncoder();
 
   constructor(options: Partial<LoggerOptions> = {}) {
     const mergedColorMap = {
@@ -205,6 +254,7 @@ export class Logger {
 
     this._validateBasePath();
     this._initializeDirectory();
+    this._initializeProcess();
   }
 
   /**
@@ -251,6 +301,57 @@ export class Logger {
     }
 
     this._verifyWritable();
+  }
+
+  /**
+   * Spawns the side car process
+   */
+  private _initializeProcess() {
+    if (!this._options.saveToLogFiles) {
+      return;
+    }
+
+    try {
+      const processPath = this._getSideCarProcessPath();
+
+      this._process = spawn("node", [processPath], {
+        stdio: ["pipe", "pipe", "pipe"],
+        detached: false,
+      });
+
+      this._process.on("error", (error) => {
+        process.stderr.write(
+          `Logger sidecar process error: ${error.message}\n`,
+        );
+        this._process = null;
+      });
+
+      this._process.on("exit", (code, signal) => {
+        if (code !== 0) {
+          process.stderr.write(
+            `Logger sidecar process exited with code ${code}, signal ${signal}\n`,
+          );
+        }
+        this._process = null;
+      });
+
+      this._process.stderr?.on("data", (data) => {
+        process.stderr.write(`Sidecar stderr: ${data}`);
+      });
+    } catch (error) {
+      const nodeError = error as Error;
+
+      throw new LoggerInitializationError(
+        `Failed to create side car process: ${nodeError.message}`,
+      );
+    }
+  }
+
+  /**
+   * Gets the path to the process file to spawn
+   */
+  private _getSideCarProcessPath(): string {
+    return path.join(__dirname, "process.js");
   }
 
   /**
@@ -439,6 +540,53 @@ export class Logger {
   }
 
   /**
+   * Send a request and await a response
+   * @param method The specific method to send
+   * @returns Promise that resolves if the request got a response
+   */
+  private _sendRequest(
+    method: MethodType,
+    payload: string,
+    level: LogLevelType,
+  ): Promise<void> {
+    const id = this._getId();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (this._pending.has(id)) {
+          this._pending.get(id)?.rej(new Error("Request timed out"));
+          this._pending.delete(id);
+        }
+      }, 5000);
+      this._pending.set(id, {
+        res: (value) => {
+          clearTimeout(timeout);
+          resolve(value);
+        },
+        rej: (value) => {
+          clearTimeout(timeout);
+          reject(value);
+        },
+      });
+
+      this._writeToStdin({ id, level, method, payload });
+    });
+  }
+
+  private _writeToStdin(request: Request) {
+    try {
+      const protocol = this._requestEncoder.encode(request);
+      this._process?.stdin.write(protocol);
+    } catch (error) {
+      const err = error as Error;
+      process.stderr.write(
+        `Failed to write to stdin of process: ${err.message}`,
+      );
+
+      throw error;
+    }
+  }
+
+  /**
    * Convert any value to string representation
    */
   private _stringify(value: any): string {
@@ -516,7 +664,7 @@ export class Logger {
   }
 
   /**
-   * Format a log message with optional timestamp and level
+   * Format a log message with optional fields
    */
   private _formatMessage(
     level: LogLevelType,
@@ -679,6 +827,13 @@ export class Logger {
    */
   fatal(message: any, ...messages: any[]): void {
     this.log(LogLevel.FATAL, message, ...messages);
+  }
+
+  /**
+   * Flushes the remaning logs and then closes the side car
+   */
+  flush(): Promise<void> {
+    return this._sendRequest(method.FLUSH, "", LogLevel.INFO);
   }
 
   /**
