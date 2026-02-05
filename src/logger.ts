@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { LogLevel, LogLevelType } from "./protocol";
+import os from "node:os";
 
 /**
  * Timestamp format options
@@ -96,6 +97,21 @@ export type LoggerOptions = {
    * Filter function to determine if a log should be processed
    */
   filter?: (level: LogLevelType, message: any) => boolean;
+
+  /**
+   * Include process ID in logs
+   */
+  showProcessId?: boolean;
+
+  /**
+   * Include hostname in logs
+   */
+  showHostname?: boolean;
+
+  /**
+   * Include environment name (dev/prod) in logs
+   */
+  environment?: string;
 };
 
 /**
@@ -459,6 +475,27 @@ export class Logger {
   ): string {
     const parts: string[] = [];
 
+    // Add environment if enabled
+    if (this._options.environment) {
+      parts.push(`[${this._options.environment}]`);
+    }
+
+    // Add hostname if enabled
+    if (this._options.showHostname) {
+      parts.push(`[${os.hostname()}]`);
+    }
+
+    // Add process ID if enabled
+    if (this._options.showProcessId) {
+      parts.push(`[${process.pid}]`);
+    }
+
+    // Add timestamp if enabled
+    if (this._options.showTimeStamps) {
+      const timestamp = this._formatTimestamp(new Date());
+      parts.push(`[${timestamp}]`);
+    }
+
     // Add timestamp if enabled
     if (this._options.showTimeStamps) {
       const timestamp = this._formatTimestamp(new Date());
@@ -499,9 +536,15 @@ export class Logger {
 
     const color = this._options.colorMap[level] || Colors.reset;
 
-    // If we have timestamp/level prefix, color only those parts
-    if (this._options.showTimeStamps || this._options.showLogLevel) {
-      // Find where the actual message starts (after ": ")
+    // If we have prefix components, color only those parts
+    const hasPrefix =
+      this._options.environment ||
+      this._options.showHostname ||
+      this._options.showProcessId ||
+      this._options.showTimeStamps ||
+      this._options.showLogLevel;
+
+    if (hasPrefix) {
       const separatorIndex = message.indexOf(": ");
       if (separatorIndex !== -1) {
         const prefix = message.slice(0, separatorIndex);
@@ -510,7 +553,6 @@ export class Logger {
       }
     }
 
-    // Otherwise color the whole message
     return `${color}${message}${Colors.reset}`;
   }
 
