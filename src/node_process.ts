@@ -26,19 +26,24 @@ const options: types.NodeProcessOptions = {
 let buffer = Buffer.alloc(0);
 
 /**
- * How much we store beofre we flush
+ * How long we wait and collect logs before flushing
  */
-const BATCH_SIZE = 1000;
+const FLUSH_MS = 100;
 
 /**
- * How long we wait and collect logs beofre flushing
+ * Buffer size threshold to trigger immediate flush (1MB)
  */
-const FLUSH_MS = 50;
+const BATCH_SIZE = 1024 * 1024;
 
 /**
- * Holds the messages we add to thje log file
+ * Holds a new line as a buffer
  */
-let batch: string[] = [];
+const NEWLINE_BUFFER = Buffer.from("\n");
+
+/**
+ * Holds the messages we add to the log file
+ */
+let batch: Buffer = Buffer.alloc(0);
 
 /**
  * The timer used to run flush batches
@@ -55,12 +60,10 @@ let writeStream: fs.WriteStream | null = null;
  *
  */
 function flushBatch() {
-  console.log("Flush being ran");
   if (batch.length === 0) return;
 
-  const data = batch.join("\n") + "\n";
-  writeStream?.write(data);
-  batch = [];
+  writeStream?.write(batch);
+  batch = Buffer.alloc(0);
 
   stopTimer();
 }
@@ -107,7 +110,7 @@ function validateOptions() {
 }
 
 /**
- * Sync create the base folder path if it does not exit
+ * Sync create the base folder path if it does not exist
  */
 function createBasePath() {
   try {
@@ -158,7 +161,7 @@ function handleRequest(req: types.NodeProcessRequest) {
       case "log":
         const logText = String(data);
 
-        batch.push(logText);
+        batch = Buffer.concat([batch, Buffer.from(logText), NEWLINE_BUFFER]);
 
         if (batch.length >= BATCH_SIZE) {
           flushBatch();

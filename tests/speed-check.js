@@ -4,48 +4,48 @@ const assert = require("assert");
 const { performance } = require("perf_hooks");
 const { NodeLogger } = require("../dist/index");
 
-// Use setImmediate for the smallest possible yield
-const yieldLoop = () => new Promise(resolve => setImmediate(resolve));
-
 async function runPerformanceTest() {
   const logDir = path.resolve(__dirname, "logs");
   const logger = new NodeLogger({
     logFilesBasePath: logDir,
     saveToLogFile: true,
-    showConsoleOutput: true, // Set to false for pure speed testing
+    showConsoleOutput: false, // Disable for maximum speed
   });
 
   const MESSAGE_COUNT = 10000;
   const msg = "Performance test message";
 
-  console.log(`--- Starting Performance Test: ${MESSAGE_COUNT} messages (Micro-delay) ---`);
+  console.log(`--- Starting Performance Test: ${MESSAGE_COUNT} messages (Maximum Speed) ---`);
 
+  // Start timing right before the logging loop
   const startTime = performance.now();
 
+  // Write all messages as fast as possible with NO delays
   for (let i = 0; i < MESSAGE_COUNT; i++) {
     logger.info(`${msg} #${i}`);
-
-    // This is the smallest possible delay. 
-    // It yields the event loop once, allowing the child process 
-    // pipe and internal buffers to process data.
-    await yieldLoop(); 
   }
 
+  // Measure time immediately after last write
   const endProductionTime = performance.now();
 
   try {
     console.log("Waiting for flush and child process exit...");
+    
+    // Start timing the flush operation
+    const flushStartTime = performance.now();
     await logger.flush();
-
-    const endTotalTime = performance.now();
+    const flushEndTime = performance.now();
 
     const productionDuration = endProductionTime - startTime;
-    const totalDuration = endTotalTime - startTime;
+    const flushDuration = flushEndTime - flushStartTime;
+    const totalDuration = flushEndTime - startTime;
 
     console.log("----------------------------------");
-    console.log(`Log production took: ${productionDuration.toFixed(2)}ms`);
-    console.log(`Total time (including flush): ${totalDuration.toFixed(2)}ms`);
-    console.log(`Avg time per loop iteration: ${(productionDuration / MESSAGE_COUNT).toFixed(4)}ms`);
+    console.log(`Message production: ${productionDuration.toFixed(2)}ms`);
+    console.log(`Flush/write duration: ${flushDuration.toFixed(2)}ms`);
+    console.log(`Total time: ${totalDuration.toFixed(2)}ms`);
+    console.log(`Avg per message (production): ${(productionDuration / MESSAGE_COUNT).toFixed(4)}ms`);
+    console.log(`Messages per second: ${(MESSAGE_COUNT / (totalDuration / 1000)).toFixed(0)}`);
     console.log("----------------------------------");
 
     const today = new Date().toISOString().split("T")[0];
@@ -57,6 +57,8 @@ async function runPerformanceTest() {
       console.log(`✅ Verified: ${lines.length} lines written to disk.`);
 
       assert.strictEqual(lines.length, MESSAGE_COUNT, `Expected ${MESSAGE_COUNT}, found ${lines.length}`);
+    } else {
+      throw new Error(`Log file not found: ${logFilePath}`);
     }
   } catch (err) {
     console.error("❌ Test failed:", err.message);
