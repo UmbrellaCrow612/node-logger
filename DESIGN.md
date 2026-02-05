@@ -72,9 +72,7 @@ In binary terms it will look like:
 
 Response messages from the server for certain methods
 
-```
-[length: u32le][id: u32le][status: u8]
-```
+
 
 | Status | Meaning           |
 | ------ | ----------------- |

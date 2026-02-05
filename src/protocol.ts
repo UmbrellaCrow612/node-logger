@@ -1,11 +1,7 @@
 /**
- * Contains the shared protocol spec
- */
-
-/**
  * Contains all methods a request / response can have
  */
-const METHODS = {
+export const METHOD = {
   /**
    * Indicates log information
    */
@@ -25,7 +21,7 @@ const METHODS = {
 /**
  * Contains all the levels logs can be indicating there importance
  */
-const LEVELS = {
+export const LEVEL = {
   /**
    * Used for information
    */
@@ -43,56 +39,104 @@ const LEVELS = {
 } as const;
 
 /**
- * Encode a message as a buffer to the spec we defined
- * @param id The message ID
- * @param method - The messages method
- * @param level - The messages log level
- * @param payload - The messages content
- * @returns Buffer
+ * What value the method can be for a request
  */
-const encode = (
-  id: number,
-  method: keyof typeof METHODS,
-  level: keyof typeof LEVELS,
-  payload: string,
-): Buffer => {
-  const payloadBuf = Buffer.from(payload, "utf-8");
-  const header = Buffer.alloc(14);
-
-  header.writeUInt32LE(id, 0);
-  header.writeUInt8(METHODS[method], 4);
-  header.writeUInt8(LEVELS[level], 5);
-  header.writeUInt32LE(Math.floor(Date.now() / 1000), 6);
-  header.writeUInt32LE(payloadBuf.length, 10);
-
-  const frameLen = header.length + payloadBuf.length;
-  const frame = Buffer.allocUnsafe(4 + frameLen);
-
-  frame.writeUInt32LE(frameLen, 0);
-  header.copy(frame, 4);
-  payloadBuf.copy(frame, 18);
-
-  return frame;
-};
-
-export = {
-  METHODS,
-  LEVELS,
-  encode,
-};
-
+export type MethodType = (typeof METHOD)[keyof typeof METHOD];
 
 /**
- * Contains protocol types
+ * What type the level can be for a request
  */
-declare namespace Protocol {
+export type LevelType = (typeof LEVEL)[keyof typeof LEVEL];
+
+/**
+ * Represents a request message object used to send messages to the log stream.
+ *
+ * This will then be mapped to our binary protocol:
+ *
+ * Binary Protocol for Log Streaming:
+ *
+ * ```
+ * Format:
+ *
+ * [0-3]   : ID (uint32, 4 bytes, big-endian)
+ * [4]     : Method (1 byte)
+ * [5]     : Level (1 byte)
+ * [6-7]   : Payload length (uint16, 2 bytes, big-endian)
+ * [8...]  : Payload (UTF-8 encoded string)
+ * ```
+ */
+export type Request = {
   /**
-   * What value the method can be for a request
+   * A way to ID this request
    */
-  export type MethodType = (typeof METHODS)[keyof typeof METHODS];
+  id: number;
 
   /**
-   * What type the level can be for a request
+   * What method this request is
    */
-  export type LevelType = (typeof LEVELS)[keyof typeof LEVELS];
+  method: MethodType;
+
+  /**
+   * What level of log this is
+   */
+  level: LevelType;
+
+  /**
+   * Any string
+   */
+  payload: string;
+};
+
+/**
+ * Used to encode the request messages to the buffer protocol encoding
+ */
+export class RequestEncoder {
+  /**
+   * Encode a request message into binary protocol
+   * @param request The request message
+   */
+  encode(request: Request): Buffer {
+    const payloadBytes = Buffer.from(request.payload, "utf-8");
+    const buffer = Buffer.allocUnsafe(8 + payloadBytes.length);
+
+    // Write ID (uint32, big-endian) at offset 0
+    buffer.writeUInt32BE(request.id, 0);
+
+    // Write method at offset 4
+    buffer[4] = request.method;
+
+    // Write level at offset 5
+    buffer[5] = request.level;
+
+    // Write payload length (uint16, big-endian) at offset 6
+    buffer.writeUInt16BE(payloadBytes.length, 6);
+
+    // Copy payload starting at offset 8
+    payloadBytes.copy(buffer, 8);
+
+    return buffer;
+  }
+
+  /**
+   * Decode a request binary protocol back into a request object
+   * @param binaryRequest The request which was encoded using the protocol
+   */
+  decode(binaryRequest: Buffer): Request {
+    // Read ID (uint32, big-endian) from offset 0
+    const id = binaryRequest.readUInt32BE(0);
+
+    // Read method from offset 4
+    const method = binaryRequest[4] as MethodType;
+
+    // Read level from offset 5
+    const level = binaryRequest[5] as LevelType;
+
+    // Read payload length (uint16, big-endian) from offset 6
+    const payloadLength = binaryRequest.readUInt16BE(6);
+
+    // Extract and decode payload from offset 8
+    const payload = binaryRequest.toString("utf-8", 8, 8 + payloadLength);
+
+    return { id, method, level, payload };
+  }
 }

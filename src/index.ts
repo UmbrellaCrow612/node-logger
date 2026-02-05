@@ -1,2 +1,0 @@
-
-import Protocol = require('./protocol');
