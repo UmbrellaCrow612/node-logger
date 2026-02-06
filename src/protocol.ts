@@ -161,9 +161,6 @@ export class ProtocolError extends Error {
 /**
  * Used to encode the request messages to the buffer protocol encoding
  */
-/**
- * Used to encode the request messages to the buffer protocol encoding
- */
 export class RequestEncoder {
   private static readonly HEADER_SIZE = 8;
   private static readonly MAX_ID = 0xffffffff;
@@ -408,6 +405,128 @@ export class ResponseEncoder {
   }
 
   /**
+   * Validates that a buffer contains a valid response binary protocol
+   * without actually decoding the content. Checks:
+   * - Buffer has complete header (8 bytes)
+   * - Reserved byte is 0x00
+   * - Success byte is 0 or 1
+   *
+   * @param buffer The buffer to validate
+   * @returns true if buffer is a valid response, false otherwise
+   */
+  static isValid(buffer: Buffer): boolean {
+    // Check complete header exists (responses are fixed 8 bytes)
+    if (buffer.length !== ResponseEncoder.HEADER_SIZE) {
+      return false;
+    }
+
+    // Check reserved byte is 0x00
+    if (buffer[7] !== 0x00) {
+      return false;
+    }
+
+    // Check success byte is valid (0 or 1)
+    const successByte = buffer[6];
+    if (successByte !== 0 && successByte !== 1) {
+      return false;
+    }
+
+    // Basic bounds check for method and level bytes
+    ResponseEncoder.getMethod(buffer);
+    ResponseEncoder.getLevel(buffer);
+
+    return true;
+  }
+
+  /**
+   * Instance method to validate with method/level checking
+   * Validates that a buffer contains a valid response with valid method and level values
+   */
+  isValidInstance(buffer: Buffer): boolean {
+    // First do static validation
+    if (!ResponseEncoder.isValid(buffer)) {
+      return false;
+    }
+
+    // Check method is valid
+    const method = ResponseEncoder.getMethod(buffer) as number;
+    if (!this.validMethods.has(method)) {
+      return false;
+    }
+
+    // Check level is valid
+    const level = ResponseEncoder.getLevel(buffer) as number;
+    if (!this.validLevels.has(level)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Get the ID from a buffer (4 bytes, uint32 at offset 0)
+   */
+  static getId(buffer: Buffer): number {
+    return buffer.readUInt32BE(0);
+  }
+
+  /**
+   * Get the method from a buffer (1 byte at offset 4)
+   */
+  static getMethod(buffer: Buffer): number | undefined {
+    return buffer[4];
+  }
+
+  /**
+   * Get the level from a buffer (1 byte at offset 5)
+   */
+  static getLevel(buffer: Buffer): number | undefined {
+    return buffer[5];
+  }
+
+  /**
+   * Get the success flag from a buffer (1 byte at offset 6)
+   * @returns boolean indicating success, or undefined if buffer too small
+   */
+  static getSuccess(buffer: Buffer): boolean | undefined {
+    if (buffer.length < 7) return undefined;
+    const successByte = buffer[6];
+    if (successByte !== 0 && successByte !== 1) {
+      return undefined;
+    }
+    return successByte === 1;
+  }
+
+  /**
+   * Get the reserved byte from a buffer (1 byte at offset 7)
+   */
+  static getReserved(buffer: Buffer): number | undefined {
+    return buffer[7];
+  }
+
+  /**
+   * Check if buffer has complete header (8 bytes)
+   * For responses, this means the buffer is exactly 8 bytes
+   */
+  static hasCompleteHeader(buffer: Buffer): boolean {
+    return buffer.length >= ResponseEncoder.HEADER_SIZE;
+  }
+
+  /**
+   * Check if buffer is a complete response message (exactly 8 bytes)
+   */
+  static hasCompleteMessage(buffer: Buffer): boolean {
+    return buffer.length === ResponseEncoder.HEADER_SIZE;
+  }
+
+  /**
+   * Get total message size (always 8 bytes for responses)
+   */
+  static getTotalMessageSize(buffer: Buffer): number {
+    return ResponseEncoder.HEADER_SIZE;
+  }
+
+  /**
    * Encode a response to the binary protocol
    * @param response The JSON response object
    * @returns Binary protocol buffer (exactly 8 bytes)
@@ -450,10 +569,10 @@ export class ResponseEncoder {
       );
     }
 
-    const id = buffer.readUInt32BE(0);
-    const method = buffer[4] as number;
-    const level = buffer[5] as number;
-    const success = buffer[6] === 1;
+    const id = ResponseEncoder.getId(buffer);
+    const method = ResponseEncoder.getMethod(buffer) as number;
+    const level = ResponseEncoder.getLevel(buffer) as number;
+    const success = ResponseEncoder.getSuccess(buffer) as boolean;
 
     if (buffer[7] !== 0x00) {
       throw new ProtocolError(

@@ -9,6 +9,8 @@ import {
   METHOD,
   ResponseEncoder,
   Response,
+  LogLevelType,
+  MethodType,
 } from "./protocol";
 import fs from "node:fs";
 
@@ -28,6 +30,26 @@ let basePath = "./logs";
 let stdinBuffer: Buffer = Buffer.alloc(0);
 
 /**
+ * Holds the buffer data we will write to the log file
+ */
+let fileWriteBuffer = Buffer.alloc(0);
+
+/**
+ * How long we wait until we flush unless the buffer gets full
+ */
+const FLUSH_MS = 130;
+
+/**
+ * How large the buffer can get beofre we have to flush
+ */
+const FILE_WRITE_BUFFER_FLUSH_LENGTH = 1;
+
+/**
+ * Holds the timeout for flush
+ */
+let flushTimeout: NodeJS.Timeout | null = null;
+
+/**
  * Used to encode and decode request binary protocol data
  */
 const requestEncoder = new RequestEncoder();
@@ -36,6 +58,25 @@ const requestEncoder = new RequestEncoder();
  * Used to encode and decode response binary protocol data
  */
 const responseEncoder = new ResponseEncoder();
+
+/**
+ * Flushes the buffer to the file and resets it
+ */
+const flush = () => {
+  fileStream?.write(fileWriteBuffer);
+  fileWriteBuffer = Buffer.alloc(0);
+};
+
+const startFlush = () => {
+  if (flushTimeout) {
+    return;
+  }
+
+  flushTimeout = setTimeout(() => {
+    flush();
+    flushTimeout = null;
+  }, FLUSH_MS);
+};
 
 /**
  * UYsed to send response to the parent
@@ -54,7 +95,17 @@ const requestHandler = (request: Buffer) => {
 
   switch (requestMethod) {
     case METHOD.LOG:
-      fileStream?.write(RequestEncoder.getPayloadBuffer(request));
+      fileWriteBuffer = Buffer.concat([
+        fileWriteBuffer,
+        RequestEncoder.getPayloadBuffer(request),
+      ]);
+
+      if (fileWriteBuffer.length > FILE_WRITE_BUFFER_FLUSH_LENGTH) {
+        flush();
+      } else {
+        startFlush();
+      }
+
       break;
 
     case METHOD.FLUSH:
@@ -68,9 +119,11 @@ const requestHandler = (request: Buffer) => {
       createStream();
 
       sendResponse({
-        id: ResponseEncoder.getId(request),
-        level: Requeste
-      })
+        id: RequestEncoder.getId(request),
+        level: RequestEncoder.getLevel(request) as LogLevelType,
+        method: RequestEncoder.getMethod(request) as MethodType,
+        success: true,
+      });
       break;
 
     default:
