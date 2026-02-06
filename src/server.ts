@@ -42,7 +42,7 @@ const FLUSH_MS = 130;
 /**
  * How large the buffer can get beofre we have to flush
  */
-const FILE_WRITE_BUFFER_FLUSH_LENGTH = 16 * 1024; // Increased to 16KB for better performance
+const FILE_WRITE_BUFFER_FLUSH_LENGTH = 16 * 1024; // 16KB
 
 /**
  * Holds the timeout for flush
@@ -128,14 +128,6 @@ const requestHandler = (request: Buffer) => {
       } else {
         startFlush();
       }
-
-      // Acknowledge the log
-      sendResponse({
-        id: requestId,
-        level: requestLevel,
-        method: requestMethod as MethodType,
-        success: true,
-      });
       break;
     }
 
