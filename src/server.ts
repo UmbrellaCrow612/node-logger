@@ -14,6 +14,11 @@ import {
 import fs from "node:fs";
 
 /**
+ * Used for sucess exits
+ */
+const EXIT_SUCCESS = 0;
+
+/**
  * Holds the stream for the log file
  */
 let fileStream: fs.WriteStream | null = null;
@@ -192,7 +197,7 @@ const requestHandler = (request: Buffer) => {
         });
 
         setImmediate(() => {
-          process.exit(0);
+          process.exit(EXIT_SUCCESS);
         });
       });
       return;
@@ -220,7 +225,7 @@ function parseBuffer() {
     stdinBuffer.length >= HEADER_SIZE &&
     processedCount < MAX_MESSAGES_PER_TICK
   ) {
-    const payloadLength = stdinBuffer.readUInt16BE(6);
+    const payloadLength = RequestEncoder.getPayloadLength(stdinBuffer);
     const totalMessageSize = HEADER_SIZE + payloadLength;
 
     if (stdinBuffer.length < totalMessageSize) {
@@ -276,7 +281,7 @@ const shutdown = () => {
   clearFlushTimeout();
   flush();
   fileStream?.end(() => {
-    process.exit(0);
+    process.exit(EXIT_SUCCESS);
   });
 };
 

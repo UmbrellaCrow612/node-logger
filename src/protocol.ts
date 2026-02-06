@@ -266,7 +266,10 @@ export class RequestEncoder {
    */
   static getPayloadBuffer(buffer: Buffer): Buffer {
     const payloadLength = RequestEncoder.getPayloadLength(buffer);
-    return buffer.subarray(8, 8 + payloadLength);
+    return buffer.subarray(
+      RequestEncoder.HEADER_SIZE,
+      RequestEncoder.HEADER_SIZE + payloadLength,
+    );
   }
 
   /**
