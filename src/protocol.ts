@@ -169,7 +169,7 @@ export class ProtocolError extends Error {
 export class RequestEncoder {
   private static readonly HEADER_SIZE = 8;
   private static readonly MAX_ID = 0xffffffff;
-  private static readonly MAX_PAYLOAD_LENGTH = 0xffff;
+  static readonly MAX_PAYLOAD_LENGTH = 0xffff;
   private validMethods: Set<number>;
   private validLevels: Set<number>;
 
@@ -187,8 +187,6 @@ export class RequestEncoder {
    * - Buffer has complete header (8 bytes)
    * - Buffer has complete message (header + payload)
    * - Payload length is within valid range (0 to 65535)
-   * - Method is valid (if instance methods/levels provided, always returns true for static check)
-   * - Level is valid (if instance methods/levels provided, always returns true for static check)
    *
    * @param buffer The buffer to validate
    * @returns true if buffer is a valid complete request, false otherwise
@@ -199,21 +197,13 @@ export class RequestEncoder {
       return false;
     }
 
-    // Check payload length is valid (read as uint16, always valid range 0-65535)
+    // Check payload length is valid
     const payloadLength = RequestEncoder.getPayloadLength(buffer);
 
     // Check complete message exists
     if (buffer.length !== RequestEncoder.HEADER_SIZE + payloadLength) {
       return false;
     }
-
-    // Basic bounds check for method and level bytes (they exist since header is complete)
-    RequestEncoder.getMethod(buffer);
-    RequestEncoder.getLevel(buffer);
-
-    // Method and level are uint8, so 0-255 is always valid for the protocol structure
-    // The semantic validation (valid method/level values) requires instance context
-    // and is handled in decode() with the instance validMethods/validLevels sets
 
     return true;
   }
@@ -436,10 +426,6 @@ export class ResponseEncoder {
       return false;
     }
 
-    // Basic bounds check for method and level bytes
-    ResponseEncoder.getMethod(buffer);
-    ResponseEncoder.getLevel(buffer);
-
     return true;
   }
 
@@ -491,14 +477,10 @@ export class ResponseEncoder {
 
   /**
    * Get the success flag from a buffer (1 byte at offset 6)
-   * @returns boolean indicating success, or undefined if buffer too small
+   * @returns boolean indicating success
    */
-  static getSuccess(buffer: Buffer): boolean | undefined {
-    if (buffer.length < 7) return undefined;
+  static getSuccess(buffer: Buffer): boolean {
     const successByte = buffer[6];
-    if (successByte !== 0 && successByte !== 1) {
-      return undefined;
-    }
     return successByte === 1;
   }
 
@@ -577,7 +559,7 @@ export class ResponseEncoder {
     const id = ResponseEncoder.getId(buffer);
     const method = ResponseEncoder.getMethod(buffer) as number;
     const level = ResponseEncoder.getLevel(buffer) as number;
-    const success = ResponseEncoder.getSuccess(buffer) as boolean;
+    const success = ResponseEncoder.getSuccess(buffer);
 
     if (buffer[7] !== 0x00) {
       throw new ProtocolError(
