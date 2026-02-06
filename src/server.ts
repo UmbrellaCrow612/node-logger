@@ -4,7 +4,6 @@
 
 import path from "node:path";
 import {
-  ProtocolError,
   RequestEncoder,
   METHOD,
   ResponseEncoder,
@@ -15,7 +14,7 @@ import {
 import fs from "node:fs";
 
 /**
- * Hols the stream for the log file
+ * Holds the stream for the log file
  */
 let fileStream: fs.WriteStream | null = null;
 
@@ -40,19 +39,24 @@ let fileWriteBuffer = Buffer.alloc(0);
 const FLUSH_MS = 130;
 
 /**
- * How large the buffer can get beofre we have to flush
+ * How large the buffer can get before we have to flush
  */
 const FILE_WRITE_BUFFER_FLUSH_LENGTH = 16 * 1024; // 16KB
+
+/**
+ * Maximum size for stdin buffer before we reset (1MB)
+ */
+const MAX_STDIN_BUFFER_SIZE = 1024 * 1024;
+
+/**
+ * Maximum messages to process per event loop tick to prevent blocking
+ */
+const MAX_MESSAGES_PER_TICK = 100;
 
 /**
  * Holds the timeout for flush
  */
 let flushTimeout: NodeJS.Timeout | null = null;
-
-/**
- * Used to encode and decode request binary protocol data
- */
-const requestEncoder = new RequestEncoder();
 
 /**
  * Used to encode and decode response binary protocol data
@@ -101,7 +105,7 @@ const startFlush = () => {
 };
 
 /**
- * UYsed to send response to the parent
+ * Used to send response to the parent
  * @param response The response
  */
 const sendResponse = (response: Response) => {
@@ -206,12 +210,16 @@ const requestHandler = (request: Buffer) => {
 };
 
 /**
- * Parses the buffer and moves it along
+ * Parses the buffer and moves it along with backpressure handling
  */
 function parseBuffer() {
   const HEADER_SIZE = RequestEncoder.getHeaderSize();
+  let processedCount = 0;
 
-  while (stdinBuffer.length >= HEADER_SIZE) {
+  while (
+    stdinBuffer.length >= HEADER_SIZE &&
+    processedCount < MAX_MESSAGES_PER_TICK
+  ) {
     const payloadLength = stdinBuffer.readUInt16BE(6);
     const totalMessageSize = HEADER_SIZE + payloadLength;
 
@@ -220,22 +228,14 @@ function parseBuffer() {
     }
 
     const messageBuffer = stdinBuffer.subarray(0, totalMessageSize);
-
-    try {
-      if (requestEncoder.isValidInstance(messageBuffer)) {
-        requestHandler(messageBuffer);
-      } else {
-        throw new Error("Parsed message buffer invalid");
-      }
-    } catch (error) {
-      if (error instanceof ProtocolError) {
-        console.error(`Protocol error: ${error.message}`);
-      } else {
-        console.error(`Unexpected error: ${error}`);
-      }
-    }
+    requestHandler(messageBuffer);
+    processedCount++;
 
     stdinBuffer = stdinBuffer.subarray(totalMessageSize);
+  }
+
+  if (stdinBuffer.length >= RequestEncoder.getHeaderSize()) {
+    setImmediate(parseBuffer);
   }
 }
 
@@ -295,6 +295,14 @@ async function main() {
   createStream();
 
   process.stdin.on("data", (chunk: Buffer<ArrayBuffer>) => {
+    if (stdinBuffer.length + chunk.length > MAX_STDIN_BUFFER_SIZE) {
+      console.error(
+        `Stdin buffer overflow: ${stdinBuffer.length + chunk.length} bytes exceeds limit of ${MAX_STDIN_BUFFER_SIZE} bytes`,
+      );
+      stdinBuffer = Buffer.alloc(0);
+      return;
+    }
+
     stdinBuffer = Buffer.concat([stdinBuffer, chunk]);
     parseBuffer();
   });
