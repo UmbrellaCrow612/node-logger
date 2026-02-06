@@ -154,7 +154,7 @@ const requestHandler = (request: Buffer) => {
       break;
 
     case METHOD.RELOAD:
-      flush(); 
+      flush();
 
       fileStream?.end(() => {
         fileStream = null;
@@ -165,6 +165,23 @@ const requestHandler = (request: Buffer) => {
           level: requestLevel,
           method: requestMethod as MethodType,
           success: true,
+        });
+      });
+      return;
+
+    case METHOD.SHUTDOWN:
+      flush();
+
+      fileStream?.end(() => {
+        sendResponse({
+          id: requestId,
+          level: requestLevel,
+          method: requestMethod as MethodType,
+          success: true,
+        });
+
+        setImmediate(() => {
+          process.exit(0);
         });
       });
       return;
