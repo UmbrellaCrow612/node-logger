@@ -161,6 +161,9 @@ export class ProtocolError extends Error {
 /**
  * Used to encode the request messages to the buffer protocol encoding
  */
+/**
+ * Used to encode the request messages to the buffer protocol encoding
+ */
 export class RequestEncoder {
   private static readonly HEADER_SIZE = 8;
   private static readonly MAX_ID = 0xffffffff;
@@ -174,6 +177,68 @@ export class RequestEncoder {
   ) {
     this.validMethods = validMethods;
     this.validLevels = validLevels;
+  }
+
+  /**
+   * Validates that a buffer contains a complete, valid request binary protocol
+   * without actually decoding the content. Checks:
+   * - Buffer has complete header (8 bytes)
+   * - Buffer has complete message (header + payload)
+   * - Payload length is within valid range (0 to 65535)
+   * - Method is valid (if instance methods/levels provided, always returns true for static check)
+   * - Level is valid (if instance methods/levels provided, always returns true for static check)
+   *
+   * @param buffer The buffer to validate
+   * @returns true if buffer is a valid complete request, false otherwise
+   */
+  static isValid(buffer: Buffer): boolean {
+    // Check complete header exists
+    if (!RequestEncoder.hasCompleteHeader(buffer)) {
+      return false;
+    }
+
+    // Check payload length is valid (read as uint16, always valid range 0-65535)
+    const payloadLength = RequestEncoder.getPayloadLength(buffer);
+
+    // Check complete message exists
+    if (buffer.length !== RequestEncoder.HEADER_SIZE + payloadLength) {
+      return false;
+    }
+
+    // Basic bounds check for method and level bytes (they exist since header is complete)
+    RequestEncoder.getMethod(buffer);
+    RequestEncoder.getLevel(buffer);
+
+    // Method and level are uint8, so 0-255 is always valid for the protocol structure
+    // The semantic validation (valid method/level values) requires instance context
+    // and is handled in decode() with the instance validMethods/validLevels sets
+
+    return true;
+  }
+
+  /**
+   * Instance method to validate with method/level checking
+   * Validates that a buffer contains a complete, valid request with valid method and level values
+   */
+  isValidInstance(buffer: Buffer): boolean {
+    // First do static validation
+    if (!RequestEncoder.isValid(buffer)) {
+      return false;
+    }
+
+    // Check method is valid
+    const method = RequestEncoder.getMethod(buffer) as number;
+    if (!this.validMethods.has(method)) {
+      return false;
+    }
+
+    // Check level is valid
+    const level = RequestEncoder.getLevel(buffer) as number;
+    if (!this.validLevels.has(level)) {
+      return false;
+    }
+
+    return true;
   }
 
   /**

@@ -3,7 +3,13 @@
  */
 
 import path from "node:path";
-import { ProtocolError, RequestEncoder, Request, METHOD } from "./protocol";
+import {
+  ProtocolError,
+  RequestEncoder,
+  METHOD,
+  ResponseEncoder,
+  Response,
+} from "./protocol";
 import fs from "node:fs";
 
 /**
@@ -27,6 +33,19 @@ let stdinBuffer: Buffer = Buffer.alloc(0);
 const requestEncoder = new RequestEncoder();
 
 /**
+ * Used to encode and decode response binary protocol data
+ */
+const responseEncoder = new ResponseEncoder();
+
+/**
+ * UYsed to send response to the parent
+ * @param response The response
+ */
+const sendResponse = (response: Response) => {
+  process.stdout.write(responseEncoder.encode(response));
+};
+
+/**
  * Handle the request decoded
  * @param request The request that was buffer bytes extracted
  */
@@ -35,14 +54,23 @@ const requestHandler = (request: Buffer) => {
 
   switch (requestMethod) {
     case METHOD.LOG:
-      const payloadBuffer = RequestEncoder.getPayloadBuffer(request);
-      fileStream?.write(payloadBuffer);
+      fileStream?.write(RequestEncoder.getPayloadBuffer(request));
       break;
 
     case METHOD.FLUSH:
       break;
 
     case METHOD.RELOAD:
+      fileStream?.end();
+      fileStream?.destroy();
+      fileStream = null;
+
+      createStream();
+
+      sendResponse({
+        id: ResponseEncoder.getId(request),
+        level: Requeste
+      })
       break;
 
     default:
@@ -68,8 +96,11 @@ function parseBuffer() {
     const messageBuffer = stdinBuffer.subarray(0, totalMessageSize);
 
     try {
-      requestEncoder.decode(messageBuffer);
-      requestHandler(messageBuffer);
+      if (requestEncoder.isValidInstance(messageBuffer)) {
+        requestHandler(messageBuffer);
+      } else {
+        throw new Error("Parsed message buffer invalid");
+      }
     } catch (error) {
       if (error instanceof ProtocolError) {
         console.error(`Protocol error: ${error.message}`);
