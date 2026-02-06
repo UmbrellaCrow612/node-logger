@@ -177,9 +177,75 @@ export class RequestEncoder {
   }
 
   /**
+   * Get the ID from a buffer (4 bytes, uint32 at offset 0)
+   */
+  static getId(buffer: Buffer): number {
+    return buffer.readUInt32BE(0);
+  }
+
+  /**
+   * Get the method from a buffer (1 byte at offset 4)
+   */
+  static getMethod(buffer: Buffer): number | undefined {
+    return buffer[4];
+  }
+
+  /**
+   * Get the level from a buffer (1 byte at offset 5)
+   */
+  static getLevel(buffer: Buffer): number | undefined {
+    return buffer[5];
+  }
+
+  /**
+   * Get the payload length from a buffer (2 bytes, uint16 at offset 6)
+   */
+  static getPayloadLength(buffer: Buffer): number {
+    return buffer.readUInt16BE(6);
+  }
+
+  /**
+   * Get the payload as a Buffer from a buffer (starting at offset 8)
+   */
+  static getPayloadBuffer(buffer: Buffer): Buffer {
+    const payloadLength = RequestEncoder.getPayloadLength(buffer);
+    return buffer.subarray(8, 8 + payloadLength);
+  }
+
+  /**
+   * Get the payload as a UTF-8 string from a buffer
+   */
+  static getPayloadString(buffer: Buffer): string {
+    return RequestEncoder.getPayloadBuffer(buffer).toString("utf-8");
+  }
+
+  /**
+   * Check if buffer has complete header (8 bytes)
+   */
+  static hasCompleteHeader(buffer: Buffer): boolean {
+    return buffer.length >= RequestEncoder.HEADER_SIZE;
+  }
+
+  /**
+   * Check if buffer has complete message (header + payload)
+   */
+  static hasCompleteMessage(buffer: Buffer): boolean {
+    if (!RequestEncoder.hasCompleteHeader(buffer)) return false;
+    const payloadLength = RequestEncoder.getPayloadLength(buffer);
+    return buffer.length >= RequestEncoder.HEADER_SIZE + payloadLength;
+  }
+
+  /**
+   * Get total message size (header + payload)
+   */
+  static getTotalMessageSize(buffer: Buffer): number {
+    if (!RequestEncoder.hasCompleteHeader(buffer))
+      return RequestEncoder.HEADER_SIZE;
+    return RequestEncoder.HEADER_SIZE + RequestEncoder.getPayloadLength(buffer);
+  }
+
+  /**
    * Encode a request to the binary protocol
-   * @param request The JSON request object
-   * @returns Binary protocol of the request
    */
   encode(request: Request): Buffer {
     if (
@@ -218,20 +284,18 @@ export class RequestEncoder {
 
   /**
    * Decode a binary protocol buffer to a request object
-   * @param buffer The binary protocol buffer
-   * @returns The decoded request object
    */
   decode(buffer: Buffer): Request {
-    if (buffer.length < RequestEncoder.HEADER_SIZE) {
+    if (!RequestEncoder.hasCompleteHeader(buffer)) {
       throw new ProtocolError(
         `Buffer too small: ${buffer.length} bytes, minimum ${RequestEncoder.HEADER_SIZE} bytes required`,
       );
     }
 
-    const id = buffer.readUInt32BE(0);
-    const method = buffer[4] as number;
-    const level = buffer[5] as number;
-    const payloadLength = buffer.readUInt16BE(6);
+    const id = RequestEncoder.getId(buffer);
+    const method = RequestEncoder.getMethod(buffer) as number;
+    const level = RequestEncoder.getLevel(buffer) as number;
+    const payloadLength = RequestEncoder.getPayloadLength(buffer);
 
     if (buffer.length !== RequestEncoder.HEADER_SIZE + payloadLength) {
       throw new ProtocolError(
@@ -246,7 +310,7 @@ export class RequestEncoder {
       throw new ProtocolError(`Invalid level: ${level}`);
     }
 
-    const payload = buffer.subarray(8, 8 + payloadLength).toString("utf-8");
+    const payload = RequestEncoder.getPayloadString(buffer);
 
     return {
       id,

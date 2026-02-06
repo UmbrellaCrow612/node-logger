@@ -3,7 +3,7 @@
  */
 
 import path from "node:path";
-import { ProtocolError, RequestEncoder } from "./protocol";
+import { ProtocolError, RequestEncoder, Request, METHOD } from "./protocol";
 import fs from "node:fs";
 
 /**
@@ -27,6 +27,31 @@ let stdinBuffer: Buffer = Buffer.alloc(0);
 const requestEncoder = new RequestEncoder();
 
 /**
+ * Handle the request decoded
+ * @param request The request that was buffer bytes extracted
+ */
+const requestHandler = (request: Buffer) => {
+  const requestMethod = RequestEncoder.getMethod(request);
+
+  switch (requestMethod) {
+    case METHOD.LOG:
+      const payloadBuffer = RequestEncoder.getPayloadBuffer(request);
+      fileStream?.write(payloadBuffer);
+      break;
+
+    case METHOD.FLUSH:
+      break;
+
+    case METHOD.RELOAD:
+      break;
+
+    default:
+      process.stderr.write(`request unhandled method ${requestMethod}`);
+      break;
+  }
+};
+
+/**
  * Parses the buffer and moves it along
  */
 function parseBuffer() {
@@ -43,9 +68,8 @@ function parseBuffer() {
     const messageBuffer = stdinBuffer.subarray(0, totalMessageSize);
 
     try {
-      const request = requestEncoder.decode(messageBuffer);
-      console.log(request);
-      //    TODO add handle
+      requestEncoder.decode(messageBuffer);
+      requestHandler(messageBuffer);
     } catch (error) {
       if (error instanceof ProtocolError) {
         console.error(`Protocol error: ${error.message}`);
