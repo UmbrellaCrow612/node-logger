@@ -1,7 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { LOG_LEVEL, LogLevelType } from "./protocol";
+import {
+  LOG_LEVEL,
+  LogLevelType,
+  Request,
+  RequestEncoder,
+  ResponseEncoder,
+  Response,
+  METHOD,
+} from "./protocol";
 import os from "node:os";
+import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 
 /**
  * Timestamp format options
@@ -188,6 +197,59 @@ export class Logger {
    */
   private _options: LoggerOptions;
 
+  /**
+   * Holds the spawned side car process
+   */
+  private _process: ChildProcessWithoutNullStreams | null = null;
+
+  /**
+   * Holds the process stdout buffer content
+   */
+  private _processStdoutBuffer: Buffer = Buffer.alloc(0);
+
+  /**
+   * Used to encode request to / from binary protocol
+   */
+  private _requestEncoder = new RequestEncoder();
+
+  /**
+   * Used to encode responses to / from binary protocol
+   */
+  private _responseEncoder = new ResponseEncoder();
+
+  /**
+   * Fast buffered writes to child process stdin with backpressure handling
+   */
+  private _writeQueue: Buffer[] = [];
+  private _writePending: boolean = false;
+
+  /**
+   * A requests id
+   */
+  private _id = 1;
+
+  /**
+   * Gets the next ID if it exceeds 1 million then rolls back to zero
+   */
+  private _getNextId = () => {
+    if (this._id > 1000000) {
+      this._id = 1;
+    }
+
+    return this._id++;
+  };
+
+  /**
+   * Holds pending requests that expect a response
+   */
+  private _pending: Map<
+    number,
+    {
+      resolve: (value: void | PromiseLike<void>) => void;
+      reject: (reason?: any) => void;
+    }
+  > = new Map();
+
   constructor(options: Partial<LoggerOptions> = {}) {
     const mergedColorMap = {
       ...defaultLoggerOptions.colorMap,
@@ -208,6 +270,219 @@ export class Logger {
 
     this._validateBasePath();
     this._initializeDirectory();
+    this._initProcess();
+  }
+
+  /**
+   * Get the path to the server / sidecar
+   * @returns Path to the server
+   */
+  private _getServerFilePath(): string {
+    return path.join(__dirname, "server.js");
+  }
+
+  /**
+   * Inits the side car process
+   */
+  private _initProcess() {
+    if (!this._options.saveToLogFiles) return;
+
+    try {
+      const serverPath = this._getServerFilePath();
+
+      this._process = spawn(serverPath, {
+        env: { BASE_PATH: this.options.basePath },
+      });
+
+      this._process.stdout.on("data", (chunk) => {
+        this._processStdoutBuffer = Buffer.concat([
+          this._processStdoutBuffer,
+          chunk,
+        ]);
+        this._parseProcessStdout();
+      });
+
+      this._process.stderr.on("data", (chunk) => {
+        process.stderr.write(`sidecar error ${chunk.toString()}`);
+      });
+
+      this._process.on("error", (err) => {
+        this._writeQueue = [];
+        this._clearPending();
+        process.stderr.write(`sidecar error ${this._stringify(err)}`);
+      });
+
+      this._process.on("exit", () => {
+        this._writeQueue = [];
+        this._clearPending();
+      });
+    } catch (error) {
+      process.stderr.write(
+        `Failed to spawn side car ${this._stringify(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Clears pending requests
+   */
+  private _clearPending() {
+    // TODO add
+  }
+
+  /**
+   * Parses the stdout buffer produced by the spawned process
+   * Uses ResponseEncoder for all protocol operations
+   */
+  private _parseProcessStdout(): void {
+    const RESPONSE_SIZE = ResponseEncoder.getHeaderSize(); // 8
+
+    while (this._processStdoutBuffer.length >= RESPONSE_SIZE) {
+      if (!ResponseEncoder.isValid(this._processStdoutBuffer)) {
+        this._processStdoutBuffer = this._processStdoutBuffer.subarray(1);
+        continue;
+      }
+
+      const responseBuffer = this._processStdoutBuffer.subarray(
+        0,
+        RESPONSE_SIZE,
+      );
+
+      const response = this._responseEncoder.decode(responseBuffer);
+
+      this._handleResponse(response);
+
+      this._processStdoutBuffer =
+        this._processStdoutBuffer.subarray(RESPONSE_SIZE);
+    }
+
+    if (this._processStdoutBuffer.length > RESPONSE_SIZE * 100) {
+      this._processStdoutBuffer = this._processStdoutBuffer.subarray(
+        -RESPONSE_SIZE + 1,
+      );
+    }
+  }
+
+  /**
+   * Handle a decoded response
+   */
+  private _handleResponse(response: Response): void {
+    this._resolvePending(response);
+
+    if (!response.success) {
+      process.stderr.write(
+        `Log operation failed: id=${response.id}, method=${response.method}, level=${response.level}\n`,
+      );
+    }
+  }
+
+  /**
+   * Resolve any pending requests that expected a response
+   * @param response The response
+   */
+  private _resolvePending(response: Response) {
+    if (this._pending.has(response.id)) {
+      const obj = this._pending.get(response.id);
+      if (response.success) {
+        obj?.resolve();
+      } else {
+        obj?.reject(new Error("Request failed"));
+      }
+      this._pending.delete(response.id);
+    }
+  }
+
+  /**
+   * Writes to the stdin of the process (optimized for high throughput)
+   */
+  private _writeToStdin(request: Request): void {
+    if (!this._process?.stdin.writable) return;
+
+    const protocolReq = this._requestEncoder.encode(request);
+
+    // Fast path: try immediate write
+    if (!this._writePending && this._writeQueue.length === 0) {
+      const canWrite = this._process.stdin.write(protocolReq);
+      if (canWrite) return; // Fast path success
+
+      // Backpressure hit - queue it and wait for drain
+      this._writePending = true;
+      this._writeQueue.push(protocolReq);
+
+      this._process.stdin.once("drain", () => {
+        this._writePending = false;
+        this._flushWriteQueue();
+      });
+      return;
+    }
+
+    // Slow path: already backpressured, queue it
+    this._writeQueue.push(protocolReq);
+
+    // Prevent unbounded memory growth - drop oldest if queue too large
+    const maxQueueSize = 1000;
+    if (this._writeQueue.length > maxQueueSize) {
+      this._writeQueue = this._writeQueue.slice(-maxQueueSize);
+    }
+  }
+
+  /**
+   * Flush queued writes efficiently
+   */
+  private _flushWriteQueue(): void {
+    if (!this._process?.stdin.writable) {
+      this._writeQueue = [];
+      return;
+    }
+
+    while (this._writeQueue.length > 0) {
+      const chunk = this._writeQueue.shift()!;
+      const canWrite = this._process.stdin.write(chunk);
+
+      if (!canWrite) {
+        // Hit backpressure again, wait for next drain
+        this._writePending = true;
+        this._process.stdin.once("drain", () => {
+          this._writePending = false;
+          this._flushWriteQueue();
+        });
+        return;
+      }
+    }
+  }
+
+  /**
+   * Send a request that expects a response to the sidecar process
+   * @param request The request to send that expects a response
+   */
+  private _sendRequest(request: Request): Promise<void> {
+    const id = this._getNextId();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (this._pending.has(id)) {
+          this._pending.get(id)?.reject(new Error("Request timed out"));
+          this._pending.delete(id);
+        }
+      }, 4000);
+
+      this._pending.set(id, {
+        reject: (reason) => {
+          clearTimeout(timeout);
+          reject(reason);
+        },
+        resolve: (value) => {
+          clearTimeout(timeout);
+          resolve(value);
+        },
+      });
+
+      this._writeToStdin({
+        id,
+        level: request.level,
+        method: request.method,
+        payload: request.payload,
+      });
+    });
   }
 
   /**
@@ -580,7 +855,7 @@ export class Logger {
   }
 
   /**
-   * Apply color to specific parts of the message if colored output is enabled
+   * Apply color to the entire message if colored output is enabled
    */
   private _colorize(level: LogLevelType, message: string): string {
     if (!this._options.useColoredOutput) {
@@ -588,25 +863,6 @@ export class Logger {
     }
 
     const color = this._options.colorMap[level] || Colors.reset;
-
-    // If we have prefix components, color only those parts
-    const hasPrefix =
-      this._options.environment ||
-      this._options.showHostname ||
-      this._options.showProcessId ||
-      this._options.showTimeStamps ||
-      this._options.showLogLevel ||
-      this._options.showCallSite;
-
-    if (hasPrefix) {
-      const separatorIndex = message.indexOf(": ");
-      if (separatorIndex !== -1) {
-        const prefix = message.slice(0, separatorIndex);
-        const content = message.slice(separatorIndex + 2);
-        return `${color}${prefix}${Colors.reset}: ${content}`;
-      }
-    }
-
     return `${color}${message}${Colors.reset}`;
   }
 
@@ -645,6 +901,12 @@ export class Logger {
     }
 
     if (this._options.saveToLogFiles) {
+      this._writeToStdin({
+        id: this._getNextId(),
+        level,
+        method: METHOD.LOG,
+        payload: formattedMessage,
+      });
     }
   }
 
@@ -681,6 +943,42 @@ export class Logger {
    */
   fatal(message: any, ...messages: any[]): void {
     this.log(LOG_LEVEL.FATAL, message, ...messages);
+  }
+
+  /**
+   * Flush remaning buffer to log files
+   */
+  flush(): Promise<void> {
+    return this._sendRequest({
+      id: this._getNextId(),
+      level: LOG_LEVEL.INFO,
+      method: METHOD.FLUSH,
+      payload: "",
+    });
+  }
+
+  /**
+   * Used to reload / refresh the process
+   */
+  reload(): Promise<void> {
+    return this._sendRequest({
+      id: this._getNextId(),
+      level: LOG_LEVEL.INFO,
+      method: METHOD.RELOAD,
+      payload: "",
+    });
+  }
+
+  /**
+   * Used to shut down the child process and clean up
+   */
+  shutdown(): Promise<void> {
+    return this._sendRequest({
+      id: this._getNextId(),
+      level: LOG_LEVEL.INFO,
+      method: METHOD.SHUTDOWN,
+      payload: "",
+    });
   }
 
   /**
