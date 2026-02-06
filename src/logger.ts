@@ -463,11 +463,11 @@ export class Logger {
    * @param request The request to send that expects a response
    */
   private _sendRequest(request: Request): Promise<void> {
-    const id = this._getNextId();
+    const id = request.id;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (this._pending.has(id)) {
-          this._pending.get(id)?.reject(new Error("Request timed out"));
+          this._pending.get(id)?.reject(new Error(`Request timed out ${this._stringify(request)}`));
           this._pending.delete(id);
         }
       }, 4000);

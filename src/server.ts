@@ -150,16 +150,16 @@ const requestHandler = (request: Buffer) => {
     case METHOD.FLUSH:
       flush();
 
-      fileStream?.once("drain", () => {
-        sendResponse({
-          id: requestId,
-          level: requestLevel,
-          method: requestMethod as MethodType,
-          success: true,
+      if (fileStream?.writableNeedDrain) {
+        fileStream.once("drain", () => {
+          sendResponse({
+            id: requestId,
+            level: requestLevel,
+            method: requestMethod as MethodType,
+            success: true,
+          });
         });
-      });
-
-      if (!fileStream?.writableNeedDrain) {
+      } else {
         sendResponse({
           id: requestId,
           level: requestLevel,
