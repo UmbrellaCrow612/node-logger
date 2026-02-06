@@ -128,6 +128,13 @@ const requestHandler = (request: Buffer) => {
       } else {
         startFlush();
       }
+
+      sendResponse({
+        id: requestId,
+        level: requestLevel,
+        method: requestMethod as MethodType,
+        success: true,
+      });
       break;
     }
 
