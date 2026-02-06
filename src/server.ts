@@ -49,16 +49,6 @@ const FLUSH_MS = 130;
 const FILE_WRITE_BUFFER_FLUSH_COUNT = 100;
 
 /**
- * Maximum size for stdin buffer before we reset (1MB)
- */
-const MAX_STDIN_BUFFER_SIZE = 1024 * 1024;
-
-/**
- * Maximum messages to process per event loop tick to prevent blocking
- */
-const MAX_MESSAGES_PER_TICK = 100;
-
-/**
  * Holds the timeout for flush
  */
 let flushTimeout: NodeJS.Timeout | null = null;
@@ -235,12 +225,8 @@ const requestHandler = (request: Buffer) => {
  */
 function parseBuffer() {
   const HEADER_SIZE = RequestEncoder.getHeaderSize();
-  let processedCount = 0;
 
-  while (
-    stdinBuffer.length >= HEADER_SIZE &&
-    processedCount < MAX_MESSAGES_PER_TICK
-  ) {
+  while (stdinBuffer.length >= HEADER_SIZE) {
     const payloadLength = RequestEncoder.getPayloadLength(stdinBuffer);
     const totalMessageSize = HEADER_SIZE + payloadLength;
 
@@ -250,7 +236,6 @@ function parseBuffer() {
 
     const messageBuffer = stdinBuffer.subarray(0, totalMessageSize);
     requestHandler(messageBuffer);
-    processedCount++;
 
     stdinBuffer = stdinBuffer.subarray(totalMessageSize);
   }
@@ -316,14 +301,6 @@ async function main() {
   createStream();
 
   process.stdin.on("data", (chunk: Buffer<ArrayBuffer>) => {
-    if (stdinBuffer.length + chunk.length > MAX_STDIN_BUFFER_SIZE) {
-      console.error(
-        `Stdin buffer overflow: ${stdinBuffer.length + chunk.length} bytes exceeds limit of ${MAX_STDIN_BUFFER_SIZE} bytes`,
-      );
-      stdinBuffer = Buffer.alloc(0);
-      return;
-    }
-
     stdinBuffer = Buffer.concat([stdinBuffer, chunk]);
     parseBuffer();
   });
