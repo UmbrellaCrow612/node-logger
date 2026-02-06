@@ -8,7 +8,7 @@ export const METHOD = {
   LOG: 0x01,
 
   /**
-   * Indicates that it needs flushing i.e write the remaining stuff and close
+   * Indicates that it needs flushing i.e write the remaining stuff
    */
   FLUSH: 0x02,
 
@@ -16,6 +16,11 @@ export const METHOD = {
    * Indicates that the stream opened needs to be closed / re opened typically used for file rotation
    */
   RELOAD: 0x03,
+
+  /**
+   * Close the child process
+   */
+  SHUTDOWN: 0x04,
 } as const;
 
 /**
@@ -522,7 +527,7 @@ export class ResponseEncoder {
   /**
    * Get total message size (always 8 bytes for responses)
    */
-  static getTotalMessageSize(buffer: Buffer): number {
+  static getTotalMessageSize(): number {
     return ResponseEncoder.HEADER_SIZE;
   }
 

@@ -42,7 +42,7 @@ const FLUSH_MS = 130;
 /**
  * How large the buffer can get beofre we have to flush
  */
-const FILE_WRITE_BUFFER_FLUSH_LENGTH = 1;
+const FILE_WRITE_BUFFER_FLUSH_LENGTH = 16 * 1024; // Increased to 16KB for better performance
 
 /**
  * Holds the timeout for flush
@@ -60,21 +60,43 @@ const requestEncoder = new RequestEncoder();
 const responseEncoder = new ResponseEncoder();
 
 /**
+ * Clears the pending flush timeout
+ */
+const clearFlushTimeout = () => {
+  if (flushTimeout) {
+    clearTimeout(flushTimeout);
+    flushTimeout = null;
+  }
+};
+
+/**
  * Flushes the buffer to the file and resets it
  */
 const flush = () => {
-  fileStream?.write(fileWriteBuffer);
+  if (fileWriteBuffer.length === 0 || !fileStream) {
+    return;
+  }
+
+  fileStream.write(fileWriteBuffer, (err) => {
+    if (err) {
+      console.error(`Write error: ${err.message}`);
+    }
+  });
+
   fileWriteBuffer = Buffer.alloc(0);
+  clearFlushTimeout();
 };
 
+/**
+ * Starts the delayed flush timer if not already running
+ */
 const startFlush = () => {
-  if (flushTimeout) {
+  if (flushTimeout !== null) {
     return;
   }
 
   flushTimeout = setTimeout(() => {
     flush();
-    flushTimeout = null;
   }, FLUSH_MS);
 };
 
@@ -92,42 +114,77 @@ const sendResponse = (response: Response) => {
  */
 const requestHandler = (request: Buffer) => {
   const requestMethod = RequestEncoder.getMethod(request);
+  const requestId = RequestEncoder.getId(request);
+  const requestLevel = RequestEncoder.getLevel(request) as LogLevelType;
 
   switch (requestMethod) {
-    case METHOD.LOG:
-      fileWriteBuffer = Buffer.concat([
-        fileWriteBuffer,
-        RequestEncoder.getPayloadBuffer(request),
-      ]);
+    case METHOD.LOG: {
+      const payload = RequestEncoder.getPayloadBuffer(request);
 
-      if (fileWriteBuffer.length > FILE_WRITE_BUFFER_FLUSH_LENGTH) {
+      fileWriteBuffer = Buffer.concat([fileWriteBuffer, payload]);
+
+      if (fileWriteBuffer.length >= FILE_WRITE_BUFFER_FLUSH_LENGTH) {
         flush();
       } else {
         startFlush();
       }
 
-      break;
-
-    case METHOD.FLUSH:
-      break;
-
-    case METHOD.RELOAD:
-      fileStream?.end();
-      fileStream?.destroy();
-      fileStream = null;
-
-      createStream();
-
+      // Acknowledge the log
       sendResponse({
-        id: RequestEncoder.getId(request),
-        level: RequestEncoder.getLevel(request) as LogLevelType,
-        method: RequestEncoder.getMethod(request) as MethodType,
+        id: requestId,
+        level: requestLevel,
+        method: requestMethod as MethodType,
         success: true,
       });
       break;
+    }
+
+    case METHOD.FLUSH:
+      flush();
+
+      fileStream?.once("drain", () => {
+        sendResponse({
+          id: requestId,
+          level: requestLevel,
+          method: requestMethod as MethodType,
+          success: true,
+        });
+      });
+
+      if (!fileStream?.writableNeedDrain) {
+        sendResponse({
+          id: requestId,
+          level: requestLevel,
+          method: requestMethod as MethodType,
+          success: true,
+        });
+      }
+      break;
+
+    case METHOD.RELOAD:
+      flush(); 
+
+      fileStream?.end(() => {
+        fileStream = null;
+        createStream();
+
+        sendResponse({
+          id: requestId,
+          level: requestLevel,
+          method: requestMethod as MethodType,
+          success: true,
+        });
+      });
+      return;
 
     default:
       process.stderr.write(`request unhandled method ${requestMethod}`);
+      sendResponse({
+        id: requestId,
+        level: requestLevel,
+        method: requestMethod as MethodType,
+        success: false,
+      });
       break;
   }
 };
@@ -184,14 +241,31 @@ const getLogFileName = (): string => {
  * Closes existing stream if one is already open.
  */
 const createStream = () => {
-  fileStream?.end();
   fileStream = null;
 
   const fileName = getLogFileName();
   const filePath = path.join(basePath, fileName);
 
   fileStream = fs.createWriteStream(filePath, { flags: "a" });
+
+  fileStream.on("error", (err) => {
+    console.error(`Stream error: ${err.message}`);
+  });
 };
+
+/**
+ * Graceful shutdown handler
+ */
+const shutdown = () => {
+  clearFlushTimeout();
+  flush();
+  fileStream?.end(() => {
+    process.exit(0);
+  });
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 /**
  * Main entry point
@@ -207,6 +281,10 @@ async function main() {
   process.stdin.on("data", (chunk: Buffer<ArrayBuffer>) => {
     stdinBuffer = Buffer.concat([stdinBuffer, chunk]);
     parseBuffer();
+  });
+
+  process.stdin.on("end", () => {
+    shutdown();
   });
 }
 
