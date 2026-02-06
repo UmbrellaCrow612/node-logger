@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { Logger } = require("../dist/logger");
+const { Logger } = require("../dist/index.js");
 
 async function main() {
   const basePath = "./logs";

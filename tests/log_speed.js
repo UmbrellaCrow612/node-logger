@@ -1,4 +1,4 @@
-const { Logger } = require("../dist/logger");
+const { Logger } = require("../dist/index.js");
 
 async function runPerformanceTest() {
   const logger = new Logger({ 
