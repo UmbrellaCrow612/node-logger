@@ -218,19 +218,14 @@ export class Logger {
   private _responseEncoder = new ResponseEncoder();
 
   /**
-   * Holds the buffer we will write to the stdin
+   * Contains list of buffer to write
    */
-  private _writeBuffer: Buffer = Buffer.alloc(0);
+  private _writeQueue: Buffer[] = [];
 
   /**
-   * Holds how large the write buffer can be
+   * Flag to prevent re-entrant drain processing
    */
-  private _writeBufferMaxLength = 1; // change
-
-  /**
-   * Holds the timeout
-   */
-  private _writeBufferTimeout: NodeJS.Timeout | null = null;
+  private _isProcessingDrain = false;
 
   /**
    * A requests id
@@ -303,6 +298,8 @@ export class Logger {
         env: { BASE_PATH: this.options.basePath },
       });
 
+      this._process.stdin.on("drain", this._onProcessDrain);
+
       this._process.stdout.on("data", (chunk) => {
         this._processStdoutBuffer = Buffer.concat([
           this._processStdoutBuffer,
@@ -317,11 +314,14 @@ export class Logger {
 
       this._process.on("error", (err) => {
         this._clearPending();
+        this._writeQueue = [];
         process.stderr.write(`sidecar error ${this._stringify(err)}`);
       });
 
       this._process.on("exit", () => {
         this._clearPending();
+        this._writeQueue = [];
+        this._process = null;
       });
     } catch (error) {
       process.stderr.write(
@@ -329,6 +329,57 @@ export class Logger {
       );
     }
   }
+
+  /**
+   * Writes to the stdin of the process
+   */
+  private _writeToStdin(request: Request): void {
+    if (!this._process?.stdin?.writable) {
+      return;
+    }
+
+    const protocolReq = this._requestEncoder.encode(request);
+    const canWrite = this._process.stdin.write(protocolReq);
+
+    if (!canWrite) {
+      this._writeQueue.push(protocolReq);
+    }
+  }
+
+  /**
+   * Runs when the process stdin is back pressured
+   */
+  private _onProcessDrain = () => {
+    if (this._isProcessingDrain) return;
+
+    // Prevent processing if process is gone
+    if (!this._process?.stdin?.writable) {
+      this._writeQueue = [];
+      return;
+    }
+
+    this._isProcessingDrain = true;
+
+    try {
+      while (this._writeQueue.length > 0) {
+        const message = this._writeQueue[0];
+
+        if (!this._process?.stdin?.writable) {
+          break;
+        }
+
+        const canWrite = this._process.stdin.write(message);
+
+        if (canWrite) {
+          this._writeQueue.shift(); 
+        } else {
+          break;
+        }
+      }
+    } finally {
+      this._isProcessingDrain = false;
+    }
+  };
 
   /**
    * Clears pending requests on process exit/error
@@ -403,29 +454,6 @@ export class Logger {
         obj?.reject(new Error("Request failed"));
       }
       this._pending.delete(response.id);
-    }
-  }
-
-  /**
-   * Writes to the stdin of the process (optimized for high throughput)
-   */
-  private _writeToStdin(request: Request): void {
-    const protocolReq = this._requestEncoder.encode(request);
-    this._writeBuffer = Buffer.concat([this._writeBuffer, protocolReq]);
-
-    if (this._writeBuffer.length >= this._writeBufferMaxLength) {
-      // stream bytes it in to stop throttle
-    } else {
-      this._startWriteToStdin();
-    }
-  }
-
-  /**
-   * Set a timer to write the current buffer to the stdin of the process
-   */
-  private _startWriteToStdin() {
-    if (!this._writeBufferTimeout) {
-      this._writeBufferTimeout = setTimeout(() => {});
     }
   }
 
