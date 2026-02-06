@@ -1,17 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  LOG_LEVEL,
-  LogLevelType,
-  METHOD,
-  MethodType,
-  Request,
-  RequestEncoder,
-  ResponseEncoder,
-  Response, // Import Response type
-} from "./protocol";
+import { LOG_LEVEL, LogLevelType } from "./protocol";
 import os from "node:os";
-import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 
 /**
  * Timestamp format options
@@ -198,62 +188,6 @@ export class Logger {
    */
   private _options: LoggerOptions;
 
-  /**
-   * Spawned side car
-   */
-  private _process: ChildProcessWithoutNullStreams | null = null;
-
-  /**
-   * Queue for pending writes to prevent interleaving
-   */
-  private _writeQueue: Array<{
-    request: Request;
-    resolve: () => void;
-    reject: (err: Error) => void;
-  }> = [];
-
-  /**
-   * If it is writing to the process
-   */
-  private _isWriting = false;
-
-  /**
-   * Id tracker
-   */
-  private _id = 0;
-
-  /**
-   * Get the next ID
-   * @returns ID
-   */
-  private _getNextId = () => this._id++;
-
-  /**
-   * Maps specific request id's to there promise's made
-   */
-  private _pending: Map<
-    number,
-    {
-      res: (value: void | PromiseLike<void>) => void;
-      rej: (reason?: any) => void;
-    }
-  > = new Map();
-
-  /**
-   * Used to map request to binary protocol
-   */
-  private _requestEncoder: RequestEncoder = new RequestEncoder();
-
-  /**
-   * Used to map responses from binary protocol
-   */
-  private _responseEncoder: ResponseEncoder = new ResponseEncoder();
-
-  /**
-   * Buffer for accumulating response data (handles partial reads)
-   */
-  private _responseBuffer: Buffer = Buffer.alloc(0);
-
   constructor(options: Partial<LoggerOptions> = {}) {
     const mergedColorMap = {
       ...defaultLoggerOptions.colorMap,
@@ -274,7 +208,6 @@ export class Logger {
 
     this._validateBasePath();
     this._initializeDirectory();
-    this._initializeProcess();
   }
 
   /**
@@ -321,126 +254,6 @@ export class Logger {
     }
 
     this._verifyWritable();
-  }
-
-  /**
-   * Spawns the side car process and sets up stdout listener
-   */
-  private _initializeProcess() {
-    if (!this._options.saveToLogFiles) {
-      return;
-    }
-
-    try {
-      const processPath = this._getSideCarProcessPath();
-
-      this._process = spawn("node", [processPath], {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { LOG_BASE_PATH: this._options.basePath },
-        detached: false,
-      });
-
-      // Set up stdout data handler for response decoding
-      this._process.stdout?.on("data", (data: Buffer) => {
-        this._handleResponseData(data);
-      });
-
-      this._process.on("error", (error) => {
-        process.stderr.write(
-          `Logger sidecar process error: ${error.message}\n`,
-        );
-        this._process = null;
-      });
-
-      this._process.on("exit", (code, signal) => {
-        if (code !== 0) {
-          process.stderr.write(
-            `Logger sidecar process exited with code ${code}, signal ${signal}\n`,
-          );
-        }
-        this._process = null;
-      });
-
-      this._process.stderr?.on("data", (data) => {
-        process.stderr.write(`Sidecar stderr: ${data}`);
-      });
-    } catch (error) {
-      const nodeError = error as Error;
-
-      throw new LoggerInitializationError(
-        `Failed to create side car process: ${nodeError.message}`,
-      );
-    }
-  }
-
-  /**
-   * Handle incoming data from sidecar stdout, decode responses and resolve pending requests
-   */
-  private _handleResponseData(data: Buffer): void {
-    // Append new data to buffer
-    this._responseBuffer = Buffer.concat([this._responseBuffer, data]);
-
-    const responseSize = 8
-
-    // Process complete responses while we have enough data
-    while (this._responseBuffer.length >= responseSize) {
-      try {
-        // Extract exactly one response (first 8 bytes)
-        const responseBytes = this._responseBuffer.subarray(0, responseSize);
-
-        // Decode the response
-        const response: Response = this._responseEncoder.decode(responseBytes);
-
-        // Remove processed bytes from buffer
-        this._responseBuffer = this._responseBuffer.subarray(responseSize);
-
-        // Resolve the corresponding pending request
-        this._resolvePendingRequest(response);
-      } catch (error) {
-        // If decoding fails, log error and clear buffer to prevent infinite loop
-        const err = error as Error;
-        process.stderr.write(`Failed to decode response: ${err.message}\n`);
-
-        // Remove one byte and try again (resync mechanism)
-        this._responseBuffer = this._responseBuffer.subarray(1);
-      }
-    }
-  }
-
-  /**
-   * Resolve a pending request based on the decoded response
-   */
-  private _resolvePendingRequest(response: Response): void {
-    const pending = this._pending.get(response.id);
-
-    if (!pending) {
-      // No pending request for this ID - might be a late response or unknown ID
-      process.stderr.write(
-        `recived a response for non pending request ${response.id}`,
-      );
-      return;
-    }
-
-    // Remove from pending map
-    this._pending.delete(response.id);
-
-    // Resolve or reject based on success flag
-    if (response.success) {
-      pending.res();
-    } else {
-      pending.rej(
-        new Error(
-          `Request ${response.id} failed (method: ${response.method}, level: ${response.level})`,
-        ),
-      );
-    }
-  }
-
-  /**
-   * Gets the path to the process file to spawn
-   */
-  private _getSideCarProcessPath(): string {
-    return path.join(__dirname, "process.js");
   }
 
   /**
@@ -626,134 +439,6 @@ export class Logger {
       /YYYY|MM|DD|HH|mm|ss|ms/g,
       (match) => tokens[match] || match,
     );
-  }
-
-  /**
-   * Send a request and await a response
-   * @param method The specific method to send
-   * @returns Promise that resolves if the request got a response
-   */
-  private async _sendRequest(
-    method: MethodType,
-    payload: string,
-    level: LogLevelType,
-  ): Promise<void> {
-    const id = this._getNextId();
-
-    return new Promise(async (resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this._pending.delete(id);
-        reject(new Error("Request timed out"));
-      }, 5000);
-
-      this._pending.set(id, {
-        res: (value) => {
-          clearTimeout(timeout);
-          resolve(value);
-        },
-        rej: (value) => {
-          clearTimeout(timeout);
-          reject(value);
-        },
-      });
-
-      try {
-        await this._writeToStdin({ id, level, method, payload });
-      } catch (err) {
-        clearTimeout(timeout);
-        this._pending.delete(id);
-        reject(err);
-      }
-    });
-  }
-
-  /**
-   * Write to the stdin of the process (serialized)
-   */
-  private async _writeToStdin(request: Request): Promise<void> {
-    const stdin = this._process?.stdin;
-
-    if (!stdin || stdin.destroyed || !this._process) {
-      throw new Error("Sidecar process stdin not available");
-    }
-
-    return new Promise((resolve, reject) => {
-      this._writeQueue.push({ request, resolve, reject });
-      this._processQueue();
-    });
-  }
-
-  /**
-   * Process the write queue one at a time
-   */
-  private async _processQueue(): Promise<void> {
-    if (this._isWriting || this._writeQueue.length === 0) {
-      return;
-    }
-
-    this._isWriting = true;
-    const { request, resolve, reject } = this._writeQueue.shift()!;
-
-    try {
-      await this._performWrite(request);
-      resolve();
-    } catch (err) {
-      reject(err as Error);
-    } finally {
-      this._isWriting = false;
-      // Process next item if any
-      if (this._writeQueue.length > 0) {
-        // Use setImmediate to avoid stack overflow with large queues
-        setImmediate(() => this._processQueue());
-      }
-    }
-  }
-
-  /**
-   * Perform actual write with backpressure handling
-   */
-  private _performWrite(request: Request): Promise<void> {
-    const stdin = this._process!.stdin;
-    const protocol = this._requestEncoder.encode(request);
-
-    return new Promise((resolve, reject) => {
-      // Clean up function to remove listeners
-      const cleanup = () => {
-        stdin.removeListener("drain", onDrain);
-        stdin.removeListener("error", onError);
-      };
-
-      const onDrain = () => {
-        cleanup();
-        resolve();
-      };
-
-      const onError = (err: Error) => {
-        cleanup();
-        reject(err);
-      };
-
-      try {
-        const canContinue = stdin.write(protocol, (err) => {
-          if (err) {
-            cleanup();
-            reject(err);
-          } else {
-            cleanup();
-            resolve();
-          }
-        });
-
-        if (!canContinue) {
-          // Only add drain listener if we actually need to wait
-          stdin.once("drain", onDrain);
-          stdin.once("error", onError);
-        }
-      } catch (syncErr) {
-        cleanup();
-        reject(syncErr as Error);
-      }
-    });
   }
 
   /**
@@ -959,17 +644,7 @@ export class Logger {
       }
     }
 
-    if (this._options.saveToLogFiles && this._process) {
-      this._writeToStdin({
-        id: this._getNextId(),
-        level,
-        method: METHOD.LOG,
-        payload: formattedMessage,
-      }).catch((err) => {
-        process.stderr.write(
-          `Failed to write log to sidecar: ${err.message}\n`,
-        );
-      });
+    if (this._options.saveToLogFiles) {
     }
   }
 
@@ -1006,39 +681,6 @@ export class Logger {
    */
   fatal(message: any, ...messages: any[]): void {
     this.log(LOG_LEVEL.FATAL, message, ...messages);
-  }
-
-  /**
-   * Flushes the remaining logs and then closes the side car
-   */
-  async flush(): Promise<void> {
-    try {
-      return await this._sendRequest(METHOD.FLUSH, "", LOG_LEVEL.INFO);
-    } finally {
-      this._cleanupProcess();
-    }
-  }
-
-  /**
-   * Clean up the sidecar process
-   */
-  private _cleanupProcess(): void {
-    if (this._process && !this._process.killed) {
-      // Remove listeners to prevent memory leaks
-      this._process.stdout?.removeAllListeners();
-      this._process.stderr?.removeAllListeners();
-      this._process.removeAllListeners();
-
-      // Kill the process
-      this._process.kill("SIGTERM");
-      this._process = null;
-    }
-
-    // Clear any pending requests that might be stuck
-    for (const [id, pending] of this._pending) {
-      pending.rej(new Error("Process closed during flush"));
-      this._pending.delete(id);
-    }
   }
 
   /**
