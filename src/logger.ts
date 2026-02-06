@@ -324,10 +324,14 @@ export class Logger {
   }
 
   /**
-   * Clears pending requests
+   * Clears pending requests on process exit/error
    */
-  private _clearPending() {
-    // TODO add
+  private _clearPending(): void {
+    const error = new Error("Sidecar process terminated");
+    for (const [_, { reject }] of this._pending) {
+      reject(error);
+    }
+    this._pending.clear();
   }
 
   /**
@@ -347,7 +351,6 @@ export class Logger {
         0,
         RESPONSE_SIZE,
       );
-
       const response = this._responseEncoder.decode(responseBuffer);
 
       this._handleResponse(response);
@@ -356,9 +359,13 @@ export class Logger {
         this._processStdoutBuffer.subarray(RESPONSE_SIZE);
     }
 
-    if (this._processStdoutBuffer.length > RESPONSE_SIZE * 100) {
-      this._processStdoutBuffer = this._processStdoutBuffer.subarray(
-        -RESPONSE_SIZE + 1,
+    // Prevent unbounded buffer growth - keep up to RESPONSE_SIZE-1 bytes of incomplete data
+    const maxBufferSize = RESPONSE_SIZE * 10; // Smaller threshold (80 bytes)
+    if (this._processStdoutBuffer.length > maxBufferSize) {
+      // This shouldn't happen with a well-behaved child, but if it does,
+      // we likely have garbage data. Keep only last 7 bytes max.
+      this._processStdoutBuffer = Buffer.from(
+        this._processStdoutBuffer.slice(-(RESPONSE_SIZE - 1)),
       );
     }
   }
