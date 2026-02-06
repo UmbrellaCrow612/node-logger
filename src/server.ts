@@ -34,9 +34,9 @@ let basePath = "./logs";
 let stdinBuffer: Buffer = Buffer.alloc(0);
 
 /**
- * Holds the buffer data we will write to the log file
+ * Holds the array of buffer data we will write to the log file
  */
-let fileWriteBuffer = Buffer.alloc(0);
+let fileWriteBufferArray: Buffer[] = [];
 
 /**
  * How long we wait until we flush unless the buffer gets full
@@ -44,9 +44,9 @@ let fileWriteBuffer = Buffer.alloc(0);
 const FLUSH_MS = 130;
 
 /**
- * How large the buffer can get before we have to flush
+ * How many buffers can accumulate before we have to flush
  */
-const FILE_WRITE_BUFFER_FLUSH_LENGTH = 16 * 1024; // 16KB
+const FILE_WRITE_BUFFER_FLUSH_COUNT = 100;
 
 /**
  * Maximum size for stdin buffer before we reset (1MB)
@@ -69,6 +69,11 @@ let flushTimeout: NodeJS.Timeout | null = null;
 const responseEncoder = new ResponseEncoder();
 
 /**
+ * Newline buffer for efficient concatenation
+ */
+const NEWLINE_BUFFER = Buffer.from("\n");
+
+/**
  * Clears the pending flush timeout
  */
 const clearFlushTimeout = () => {
@@ -79,20 +84,31 @@ const clearFlushTimeout = () => {
 };
 
 /**
- * Flushes the buffer to the file and resets it
+ * Flushes the buffer array to the file and resets it
  */
 const flush = () => {
-  if (fileWriteBuffer.length === 0 || !fileStream) {
+  if (fileWriteBufferArray.length === 0 || !fileStream) {
     return;
   }
 
-  fileStream.write(fileWriteBuffer, (err) => {
+  const joinedBuffer = Buffer.concat([
+    Buffer.concat(
+      fileWriteBufferArray.map((buf, index) =>
+        index < fileWriteBufferArray.length - 1
+          ? Buffer.concat([buf, NEWLINE_BUFFER])
+          : buf,
+      ),
+    ),
+    NEWLINE_BUFFER,
+  ]);
+
+  fileStream.write(joinedBuffer, (err) => {
     if (err) {
       console.error(`Write error: ${err.message}`);
     }
   });
 
-  fileWriteBuffer = Buffer.alloc(0);
+  fileWriteBufferArray = [];
   clearFlushTimeout();
 };
 
@@ -130,9 +146,9 @@ const requestHandler = (request: Buffer) => {
     case METHOD.LOG: {
       const payload = RequestEncoder.getPayloadBuffer(request);
 
-      fileWriteBuffer = Buffer.concat([fileWriteBuffer, payload]);
+      fileWriteBufferArray.push(payload);
 
-      if (fileWriteBuffer.length >= FILE_WRITE_BUFFER_FLUSH_LENGTH) {
+      if (fileWriteBufferArray.length >= FILE_WRITE_BUFFER_FLUSH_COUNT) {
         flush();
       } else {
         startFlush();

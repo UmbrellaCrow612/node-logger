@@ -218,10 +218,19 @@ export class Logger {
   private _responseEncoder = new ResponseEncoder();
 
   /**
-   * Fast buffered writes to child process stdin with backpressure handling
+   * Holds the buffer we will write to the stdin
    */
-  private _writeQueue: Buffer[] = [];
-  private _writePending: boolean = false;
+  private _writeBuffer: Buffer = Buffer.alloc(0);
+
+  /**
+   * Holds how large the write buffer can be
+   */
+  private _writeBufferMaxLength = 1; // change
+
+  /**
+   * Holds the timeout
+   */
+  private _writeBufferTimeout: NodeJS.Timeout | null = null;
 
   /**
    * A requests id
@@ -307,13 +316,11 @@ export class Logger {
       });
 
       this._process.on("error", (err) => {
-        this._writeQueue = [];
         this._clearPending();
         process.stderr.write(`sidecar error ${this._stringify(err)}`);
       });
 
       this._process.on("exit", () => {
-        this._writeQueue = [];
         this._clearPending();
       });
     } catch (error) {
@@ -403,58 +410,22 @@ export class Logger {
    * Writes to the stdin of the process (optimized for high throughput)
    */
   private _writeToStdin(request: Request): void {
-    if (!this._process?.stdin.writable) return;
-
     const protocolReq = this._requestEncoder.encode(request);
+    this._writeBuffer = Buffer.concat([this._writeBuffer, protocolReq]);
 
-    // Fast path: try immediate write
-    if (!this._writePending && this._writeQueue.length === 0) {
-      const canWrite = this._process.stdin.write(protocolReq);
-      if (canWrite) return; // Fast path success
-
-      // Backpressure hit - queue it and wait for drain
-      this._writePending = true;
-      this._writeQueue.push(protocolReq);
-
-      this._process.stdin.once("drain", () => {
-        this._writePending = false;
-        this._flushWriteQueue();
-      });
-      return;
-    }
-
-    // Slow path: already backpressured, queue it
-    this._writeQueue.push(protocolReq);
-
-    // Prevent unbounded memory growth - drop oldest if queue too large
-    const maxQueueSize = 1000;
-    if (this._writeQueue.length > maxQueueSize) {
-      this._writeQueue = this._writeQueue.slice(-maxQueueSize);
+    if (this._writeBuffer.length >= this._writeBufferMaxLength) {
+      // stream bytes it in to stop throttle
+    } else {
+      this._startWriteToStdin();
     }
   }
 
   /**
-   * Flush queued writes efficiently
+   * Set a timer to write the current buffer to the stdin of the process
    */
-  private _flushWriteQueue(): void {
-    if (!this._process?.stdin.writable) {
-      this._writeQueue = [];
-      return;
-    }
-
-    while (this._writeQueue.length > 0) {
-      const chunk = this._writeQueue.shift()!;
-      const canWrite = this._process.stdin.write(chunk);
-
-      if (!canWrite) {
-        // Hit backpressure again, wait for next drain
-        this._writePending = true;
-        this._process.stdin.once("drain", () => {
-          this._writePending = false;
-          this._flushWriteQueue();
-        });
-        return;
-      }
+  private _startWriteToStdin() {
+    if (!this._writeBufferTimeout) {
+      this._writeBufferTimeout = setTimeout(() => {});
     }
   }
 
