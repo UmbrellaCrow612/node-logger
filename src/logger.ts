@@ -223,11 +223,6 @@ export class Logger {
   private _writeQueue: Buffer[] = [];
 
   /**
-   * Flag to prevent re-entrant drain processing
-   */
-  private _isProcessingDrain = false;
-
-  /**
    * A requests id
    */
   private _id = 1;
@@ -298,8 +293,6 @@ export class Logger {
         env: { BASE_PATH: this.options.basePath },
       });
 
-      this._process.stdin.on("drain", this._onProcessDrain);
-
       this._process.stdout.on("data", (chunk) => {
         this._processStdoutBuffer = Buffer.concat([
           this._processStdoutBuffer,
@@ -345,41 +338,6 @@ export class Logger {
       this._writeQueue.push(protocolReq);
     }
   }
-
-  /**
-   * Runs when the process stdin is back pressured
-   */
-  private _onProcessDrain = () => {
-    if (this._isProcessingDrain) return;
-
-    // Prevent processing if process is gone
-    if (!this._process?.stdin?.writable) {
-      this._writeQueue = [];
-      return;
-    }
-
-    this._isProcessingDrain = true;
-
-    try {
-      while (this._writeQueue.length > 0) {
-        const message = this._writeQueue[0];
-
-        if (!this._process?.stdin?.writable) {
-          break;
-        }
-
-        const canWrite = this._process.stdin.write(message);
-
-        if (canWrite) {
-          this._writeQueue.shift(); 
-        } else {
-          break;
-        }
-      }
-    } finally {
-      this._isProcessingDrain = false;
-    }
-  };
 
   /**
    * Clears pending requests on process exit/error
