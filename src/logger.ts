@@ -290,7 +290,7 @@ export class Logger {
     try {
       const serverPath = this._getServerFilePath();
 
-      this._process = spawn(serverPath, {
+      this._process = spawn("node", [serverPath], {
         env: { BASE_PATH: this.options.basePath },
       });
 
@@ -467,7 +467,11 @@ export class Logger {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (this._pending.has(id)) {
-          this._pending.get(id)?.reject(new Error(`Request timed out ${this._stringify(request)}`));
+          this._pending
+            .get(id)
+            ?.reject(
+              new Error(`Request timed out ${this._stringify(request)}`),
+            );
           this._pending.delete(id);
         }
       }, 4000);
