@@ -218,11 +218,6 @@ export class Logger {
   private _responseEncoder = new ResponseEncoder();
 
   /**
-   * Contains list of buffer to write
-   */
-  private _writeQueue: Buffer[] = [];
-
-  /**
    * A requests id
    */
   private _id = 1;
@@ -307,13 +302,11 @@ export class Logger {
 
       this._process.on("error", (err) => {
         this._clearPending();
-        this._writeQueue = [];
         process.stderr.write(`sidecar error ${this._stringify(err)}`);
       });
 
       this._process.on("exit", () => {
         this._clearPending();
-        this._writeQueue = [];
         this._process = null;
       });
     } catch (error) {
@@ -332,11 +325,7 @@ export class Logger {
     }
 
     const protocolReq = this._requestEncoder.encode(request);
-    const canWrite = this._process.stdin.write(protocolReq);
-
-    if (!canWrite) {
-      this._writeQueue.push(protocolReq);
-    }
+    this._process.stdin.write(protocolReq);
   }
 
   /**
