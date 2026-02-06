@@ -2,9 +2,9 @@ const { Logger } = require("../dist/logger");
 
 async function runPerformanceTest() {
   const logger = new Logger({ 
-    showCallSite: true, 
     basePath: "./logs",
-    saveToLogFiles: true 
+    saveToLogFiles: true,
+    outputToConsole: false
   });
 
   console.log("=== Performance Test: 10,000 Log Lines ===\n");
