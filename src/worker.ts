@@ -108,13 +108,6 @@ const requestHandler = (request: RequestLog) => {
       } else {
         startFlush();
       }
-
-      sendResponse({
-        id: request.id,
-        level: request.level,
-        method: request.method,
-        success: true,
-      });
       break;
     }
 
