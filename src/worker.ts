@@ -116,16 +116,16 @@ const requestHandler = (request: RequestLog) => {
       if (fileStream?.writableNeedDrain) {
         fileStream.once("drain", () => {
           sendResponse({
-            id: request.id,
-            level: request.level,
+            id: request.id!,
+            level: request.level!,
             method: request.method,
             success: true,
           });
         });
       } else {
         sendResponse({
-          id: request.id,
-          level: request.level,
+          id: request.id!,
+          level: request.level!,
           method: request.method,
           success: true,
         });
@@ -140,8 +140,8 @@ const requestHandler = (request: RequestLog) => {
         createStream();
 
         sendResponse({
-          id: request.id,
-          level: request.level,
+          id: request.id!,
+          level: request.level!,
           method: request.method,
           success: true,
         });
@@ -153,8 +153,8 @@ const requestHandler = (request: RequestLog) => {
 
       fileStream?.end(() => {
         sendResponse({
-          id: request.id,
-          level: request.level,
+          id: request.id!,
+          level: request.level!,
           method: request.method,
           success: true,
         });
@@ -168,8 +168,8 @@ const requestHandler = (request: RequestLog) => {
     default:
       process.stderr.write(`Unhandled request method: ${request.method}\n`);
       sendResponse({
-        id: request.id,
-        level: request.level,
+        id: request.id!,
+        level: request.level!,
         method: request.method,
         success: false,
       });
