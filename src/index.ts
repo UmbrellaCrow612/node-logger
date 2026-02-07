@@ -617,40 +617,37 @@ export class Logger {
    * Convert any value to string representation
    */
   private _stringify(value: any): string {
+    const valueType = typeof value;
+
     if (value === null) return "null";
     if (value === undefined) return "undefined";
+    if (valueType === "string") return value;
+    if (valueType === "number") return String(value);
+    if (valueType === "boolean") return String(value);
+    if (valueType === "bigint") return `${value}n`;
+    if (valueType === "symbol") return value.toString();
+    if (valueType === "function")
+      return `[Function: ${value.name || "anonymous"}]`;
 
-    // Check if value is an Error instance
+    // Check if value is an Error instance (must be object, so check after primitives)
     if (value instanceof Error) {
-      const errorParts: string[] = [];
+      const errorParts: string[] = [
+        `name: ${value.name}`,
+        `message: ${value.message}`,
+      ];
 
-      // Always present Error properties
-      errorParts.push(`name: ${value.name}`);
-      errorParts.push(`message: ${value.message}`);
-
-      if (value.stack) {
-        errorParts.push(`stack: ${value.stack}`);
-      }
-
-      // Additional common Error properties
-      if ("code" in value && value.code !== undefined) {
+      if (value.stack) errorParts.push(`stack: ${value.stack}`);
+      if ("code" in value && value.code !== undefined)
         errorParts.push(`code: ${value.code}`);
-      }
-
-      if ("errno" in value && value.errno !== undefined) {
+      if ("errno" in value && value.errno !== undefined)
         errorParts.push(`errno: ${value.errno}`);
-      }
-
-      if ("syscall" in value && value.syscall !== undefined) {
+      if ("syscall" in value && value.syscall !== undefined)
         errorParts.push(`syscall: ${value.syscall}`);
-      }
-
-      if ("path" in value && value.path !== undefined) {
+      if ("path" in value && value.path !== undefined)
         errorParts.push(`path: ${value.path}`);
-      }
 
-      // Capture any other enumerable or non-enumerable custom properties
-      const standardProps = [
+      // Capture custom properties
+      const standardProps = new Set([
         "name",
         "message",
         "stack",
@@ -658,35 +655,52 @@ export class Logger {
         "errno",
         "syscall",
         "path",
-      ];
-      const allProps = Object.getOwnPropertyNames(value);
-
-      for (const prop of allProps) {
-        if (!standardProps.includes(prop)) {
-          try {
-            const propValue = (value as any)[prop];
-            // Avoid circular references by doing a simple type check
-            if (typeof propValue === "object" && propValue !== null) {
-              errorParts.push(`${prop}: [object]`);
-            } else {
-              errorParts.push(`${prop}: ${propValue}`);
-            }
-          } catch {
-            errorParts.push(`${prop}: [unreadable]`);
-          }
+      ]);
+      for (const prop of Object.getOwnPropertyNames(value)) {
+        if (standardProps.has(prop)) continue;
+        try {
+          const propValue = (value as any)[prop];
+          errorParts.push(
+            `${prop}: ${typeof propValue === "object" && propValue !== null ? "[object]" : propValue}`,
+          );
+        } catch {
+          errorParts.push(`${prop}: [unreadable]`);
         }
       }
 
       return `Error { ${errorParts.join(", ")} }`;
     }
 
-    if (typeof value === "object") {
-      try {
-        return JSON.stringify(value, null, 2);
-      } catch {
-        return "[Circular Object]";
-      }
+    if (valueType === "object") {
+      const keys = Object.keys(value);
+      if (keys.length === 0) return "{}";
+
+      const entries = keys.map((key) => {
+        try {
+          const val = value[key];
+          // Show type for nested objects/arrays, value for primitives
+          const display =
+            val === null
+              ? "null"
+              : Array.isArray(val)
+                ? "[Array]"
+                : typeof val === "object"
+                  ? "[Object]"
+                  : typeof val === "function"
+                    ? "[Function]"
+                    : typeof val === "symbol"
+                      ? "[Symbol]"
+                      : String(val);
+          return `${key}: ${display}`;
+        } catch {
+          return `${key}: [unreadable]`;
+        }
+      });
+
+      return `{ ${entries.join(", ")} }`;
     }
+
+    // Fallback (shouldn't reach here with standard JS types)
     return String(value);
   }
 
