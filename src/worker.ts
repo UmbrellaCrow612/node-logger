@@ -35,7 +35,7 @@ const FLUSH_MS = 130;
 /**
  * How many entries can accumulate before we have to flush
  */
-const BUFFER_FLUSH_COUNT = 100;
+const BUFFER_FLUSH_COUNT = 300;
 
 /**
  * Holds the timeout for flush
