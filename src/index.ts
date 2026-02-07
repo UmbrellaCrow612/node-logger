@@ -10,7 +10,7 @@ import {
   METHOD,
 } from "./protocol";
 import os from "node:os";
-import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { Worker } from "node:worker_threads";
 
 /**
  * Timestamp format options
@@ -198,14 +198,14 @@ export class Logger {
   private _options: LoggerOptions;
 
   /**
-   * Holds the spawned side car process
+   * Holds the wokrer thread
    */
-  private _process: ChildProcessWithoutNullStreams | null = null;
+  private _worker: Worker | null = null;
 
   /**
    * Holds the process stdout buffer content
    */
-  private _processStdoutBuffer: Buffer = Buffer.alloc(0);
+  private _workerOutputBuffer: Buffer = Buffer.alloc(0);
 
   /**
    * Used to encode request to / from binary protocol
@@ -264,50 +264,48 @@ export class Logger {
 
     this._validateBasePath();
     this._initializeDirectory();
-    this._initProcess();
+    this._initWorker();
   }
 
   /**
-   * Get the path to the server / sidecar
-   * @returns Path to the server
+   * Get the path to the worker
+   * @returns Path to the worker
    */
-  private _getServerFilePath(): string {
-    return path.join(__dirname, "server.js");
+  private _getWorkerPath(): string {
+    return path.join(__dirname, "worker.js");
   }
 
   /**
-   * Inits the side car process
+   * Inits the worker thread
    */
-  private _initProcess() {
+  private _initWorker() {
     if (!this._options.saveToLogFiles) return;
 
     try {
-      const serverPath = this._getServerFilePath();
+      const workerPath = this._getWorkerPath();
 
-      this._process = spawn("node", [serverPath], {
-        env: { BASE_PATH: this.options.basePath },
-      });
+      this._worker = new Worker(workerPath);
 
-      this._process.stdout.on("data", (chunk) => {
-        this._processStdoutBuffer = Buffer.concat([
-          this._processStdoutBuffer,
+      this._worker.on("message", (chunk) => {
+        this._workerOutputBuffer = Buffer.concat([
+          this._workerOutputBuffer,
           chunk,
         ]);
-        this._parseProcessStdout();
+        this._parseWorkerOutput();
       });
 
-      this._process.stderr.on("data", (chunk) => {
+      this._worker.stderr.on("data", (chunk) => {
         process.stderr.write(`sidecar error ${chunk.toString()}`);
       });
 
-      this._process.on("error", (err) => {
+      this._worker.on("error", (err) => {
         this._clearPending();
         process.stderr.write(`sidecar error ${this._stringify(err)}`);
       });
 
-      this._process.on("exit", () => {
+      this._worker.on("exit", () => {
         this._clearPending();
-        this._process = null;
+        this._worker = null;
       });
     } catch (error) {
       process.stderr.write(
@@ -317,15 +315,15 @@ export class Logger {
   }
 
   /**
-   * Writes to the stdin of the process
+   * Sends a message to worker thread
    */
-  private _writeToStdin(request: Request): void {
-    if (!this._process?.stdin?.writable) {
+  private _sendToWorker(request: Request): void {
+    if (!this._worker) {
       return;
     }
 
     const protocolReq = this._requestEncoder.encode(request);
-    this._process.stdin.write(protocolReq);
+    this._worker?.postMessage(protocolReq);
   }
 
   /**
@@ -341,18 +339,17 @@ export class Logger {
 
   /**
    * Parses the stdout buffer produced by the spawned process
-   * Uses ResponseEncoder for all protocol operations
    */
-  private _parseProcessStdout(): void {
+  private _parseWorkerOutput(): void {
     const RESPONSE_SIZE = ResponseEncoder.getHeaderSize(); // 8
 
-    while (this._processStdoutBuffer.length >= RESPONSE_SIZE) {
-      if (!ResponseEncoder.isValid(this._processStdoutBuffer)) {
-        this._processStdoutBuffer = this._processStdoutBuffer.subarray(1);
+    while (this._workerOutputBuffer.length >= RESPONSE_SIZE) {
+      if (!ResponseEncoder.isValid(this._workerOutputBuffer)) {
+        this._workerOutputBuffer = this._workerOutputBuffer.subarray(1);
         continue;
       }
 
-      const responseBuffer = this._processStdoutBuffer.subarray(
+      const responseBuffer = this._workerOutputBuffer.subarray(
         0,
         RESPONSE_SIZE,
       );
@@ -360,18 +357,8 @@ export class Logger {
 
       this._handleResponse(response);
 
-      this._processStdoutBuffer =
-        this._processStdoutBuffer.subarray(RESPONSE_SIZE);
-    }
-
-    // Prevent unbounded buffer growth - keep up to RESPONSE_SIZE-1 bytes of incomplete data
-    const maxBufferSize = RESPONSE_SIZE * 10; // Smaller threshold (80 bytes)
-    if (this._processStdoutBuffer.length > maxBufferSize) {
-      // This shouldn't happen with a well-behaved child, but if it does,
-      // we likely have garbage data. Keep only last 7 bytes max.
-      this._processStdoutBuffer = Buffer.from(
-        this._processStdoutBuffer.slice(-(RESPONSE_SIZE - 1)),
-      );
+      this._workerOutputBuffer =
+        this._workerOutputBuffer.subarray(RESPONSE_SIZE);
     }
   }
 
@@ -433,7 +420,7 @@ export class Logger {
         },
       });
 
-      this._writeToStdin({
+      this._sendToWorker({
         id,
         level: request.level,
         method: request.method,
@@ -858,7 +845,7 @@ export class Logger {
     }
 
     if (this._options.saveToLogFiles) {
-      this._writeToStdin({
+      this._sendToWorker({
         id: this._getNextId(),
         level,
         method: METHOD.LOG,

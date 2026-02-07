@@ -1,5 +1,5 @@
 /**
- * This is a self contained script that runs as the server process which accepts the binary protocol and then performs actions
+ * This is a worker file which will be spawned
  */
 
 import path from "node:path";
@@ -12,6 +12,7 @@ import {
   MethodType,
 } from "./protocol";
 import fs from "node:fs";
+import { parentPort } from "worker_threads";
 
 /**
  * Used for sucess exits
@@ -29,9 +30,9 @@ let fileStream: fs.WriteStream | null = null;
 let basePath = "./logs";
 
 /**
- * Holds stdin buffer
+ * Holds parents message buffer
  */
-let stdinBuffer: Buffer = Buffer.alloc(0);
+let parentMessageBuffer: Buffer = Buffer.alloc(0);
 
 /**
  * Holds the array of buffer data we will write to the log file
@@ -120,7 +121,7 @@ const startFlush = () => {
  * @param response The response
  */
 const sendResponse = (response: Response) => {
-  process.stdout.write(responseEncoder.encode(response));
+  parentPort?.postMessage(responseEncoder.encode(response));
 };
 
 /**
@@ -226,21 +227,21 @@ const requestHandler = (request: Buffer) => {
 function parseBuffer() {
   const HEADER_SIZE = RequestEncoder.getHeaderSize();
 
-  while (stdinBuffer.length >= HEADER_SIZE) {
-    const payloadLength = RequestEncoder.getPayloadLength(stdinBuffer);
+  while (parentMessageBuffer.length >= HEADER_SIZE) {
+    const payloadLength = RequestEncoder.getPayloadLength(parentMessageBuffer);
     const totalMessageSize = HEADER_SIZE + payloadLength;
 
-    if (stdinBuffer.length < totalMessageSize) {
+    if (parentMessageBuffer.length < totalMessageSize) {
       break;
     }
 
-    const messageBuffer = stdinBuffer.subarray(0, totalMessageSize);
+    const messageBuffer = parentMessageBuffer.subarray(0, totalMessageSize);
     requestHandler(messageBuffer);
 
-    stdinBuffer = stdinBuffer.subarray(totalMessageSize);
+    parentMessageBuffer = parentMessageBuffer.subarray(totalMessageSize);
   }
 
-  if (stdinBuffer.length >= RequestEncoder.getHeaderSize()) {
+  if (parentMessageBuffer.length >= RequestEncoder.getHeaderSize()) {
     setImmediate(parseBuffer);
   }
 }
@@ -276,20 +277,6 @@ const createStream = () => {
 };
 
 /**
- * Graceful shutdown handler
- */
-const shutdown = () => {
-  clearFlushTimeout();
-  flush();
-  fileStream?.end(() => {
-    process.exit(EXIT_SUCCESS);
-  });
-};
-
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-
-/**
  * Main entry point
  */
 async function main() {
@@ -300,13 +287,9 @@ async function main() {
 
   createStream();
 
-  process.stdin.on("data", (chunk: Buffer<ArrayBuffer>) => {
-    stdinBuffer = Buffer.concat([stdinBuffer, chunk]);
+  parentPort?.on("message", (chunk: Buffer<ArrayBuffer>) => {
+    parentMessageBuffer = Buffer.concat([parentMessageBuffer, chunk]);
     parseBuffer();
-  });
-
-  process.stdin.on("end", () => {
-    shutdown();
   });
 }
 
