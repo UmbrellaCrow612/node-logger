@@ -1,14 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  LOG_LEVEL,
-  LogLevelType,
-  Request,
-  RequestEncoder,
-  ResponseEncoder,
-  Response,
-  METHOD,
-} from "./protocol";
+import { LOG_LEVEL, LogLevelType, RequestLog, LogResponse, METHOD } from "./protocol";
 import os from "node:os";
 import { Worker } from "node:worker_threads";
 
@@ -203,21 +195,6 @@ export class Logger {
   private _worker: Worker | null = null;
 
   /**
-   * Holds the process stdout buffer content
-   */
-  private _workerOutputBuffer: Buffer = Buffer.alloc(0);
-
-  /**
-   * Used to encode request to / from binary protocol
-   */
-  private _requestEncoder = new RequestEncoder();
-
-  /**
-   * Used to encode responses to / from binary protocol
-   */
-  private _responseEncoder = new ResponseEncoder();
-
-  /**
    * A requests id
    */
   private _id = 1;
@@ -286,12 +263,8 @@ export class Logger {
 
       this._worker = new Worker(workerPath);
 
-      this._worker.on("message", (chunk) => {
-        this._workerOutputBuffer = Buffer.concat([
-          this._workerOutputBuffer,
-          chunk,
-        ]);
-        this._parseWorkerOutput();
+      this._worker.on("message", (response: LogResponse) => {
+        this._handleResponse(response);
       });
 
       this._worker.stderr.on("data", (chunk) => {
@@ -317,13 +290,12 @@ export class Logger {
   /**
    * Sends a message to worker thread
    */
-  private _sendToWorker(request: Request): void {
+  private _sendToWorker(request: RequestLog): void {
     if (!this._worker) {
       return;
     }
 
-    const protocolReq = this._requestEncoder.encode(request);
-    this._worker?.postMessage(protocolReq);
+    this._worker?.postMessage(request);
   }
 
   /**
@@ -338,34 +310,9 @@ export class Logger {
   }
 
   /**
-   * Parses the stdout buffer produced by the spawned process
-   */
-  private _parseWorkerOutput(): void {
-    const RESPONSE_SIZE = ResponseEncoder.getHeaderSize(); // 8
-
-    while (this._workerOutputBuffer.length >= RESPONSE_SIZE) {
-      if (!ResponseEncoder.isValid(this._workerOutputBuffer)) {
-        this._workerOutputBuffer = this._workerOutputBuffer.subarray(1);
-        continue;
-      }
-
-      const responseBuffer = this._workerOutputBuffer.subarray(
-        0,
-        RESPONSE_SIZE,
-      );
-      const response = this._responseEncoder.decode(responseBuffer);
-
-      this._handleResponse(response);
-
-      this._workerOutputBuffer =
-        this._workerOutputBuffer.subarray(RESPONSE_SIZE);
-    }
-  }
-
-  /**
    * Handle a decoded response
    */
-  private _handleResponse(response: Response): void {
+  private _handleResponse(response: LogResponse): void {
     this._resolvePending(response);
 
     if (!response.success) {
@@ -379,7 +326,7 @@ export class Logger {
    * Resolve any pending requests that expected a response
    * @param response The response
    */
-  private _resolvePending(response: Response) {
+  private _resolvePending(response: LogResponse) {
     if (this._pending.has(response.id)) {
       const obj = this._pending.get(response.id);
       if (response.success) {
@@ -395,7 +342,7 @@ export class Logger {
    * Send a request that expects a response to the sidecar process
    * @param request The request to send that expects a response
    */
-  private _sendRequest(request: Request): Promise<void> {
+  private _sendRequest(request: RequestLog): Promise<void> {
     const id = request.id;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {

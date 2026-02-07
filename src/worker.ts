@@ -4,12 +4,9 @@
 
 import path from "node:path";
 import {
-  RequestEncoder,
   METHOD,
-  ResponseEncoder,
-  Response,
-  LogLevelType,
-  MethodType,
+  LogResponse,
+  RequestLog,
 } from "./protocol";
 import fs from "node:fs";
 import { parentPort } from "worker_threads";
@@ -30,14 +27,9 @@ let fileStream: fs.WriteStream | null = null;
 let basePath = "./logs";
 
 /**
- * Holds parents message buffer
- */
-let parentMessageBuffer: Buffer = Buffer.alloc(0);
-
-/**
  * Holds the array of buffer data we will write to the log file
  */
-let fileWriteBufferArray: Buffer[] = [];
+let fileWriteArray: RequestLog[] = [];
 
 /**
  * How long we wait until we flush unless the buffer gets full
@@ -47,22 +39,12 @@ const FLUSH_MS = 130;
 /**
  * How many buffers can accumulate before we have to flush
  */
-const FILE_WRITE_BUFFER_FLUSH_COUNT = 100;
+const FILE_WRITE_FLUSH_COUNT = 100;
 
 /**
  * Holds the timeout for flush
  */
 let flushTimeout: NodeJS.Timeout | null = null;
-
-/**
- * Used to encode and decode response binary protocol data
- */
-const responseEncoder = new ResponseEncoder();
-
-/**
- * Newline buffer for efficient concatenation
- */
-const NEWLINE_BUFFER = Buffer.from("\n");
 
 /**
  * Clears the pending flush timeout
@@ -78,28 +60,22 @@ const clearFlushTimeout = () => {
  * Flushes the buffer array to the file and resets it
  */
 const flush = () => {
-  if (fileWriteBufferArray.length === 0 || !fileStream) {
+  if (fileWriteArray.length === 0 || !fileStream) {
     return;
   }
 
-  const joinedBuffer = Buffer.concat([
-    Buffer.concat(
-      fileWriteBufferArray.map((buf, index) =>
-        index < fileWriteBufferArray.length - 1
-          ? Buffer.concat([buf, NEWLINE_BUFFER])
-          : buf,
-      ),
-    ),
-    NEWLINE_BUFFER,
-  ]);
+  let payload = "";
+  fileWriteArray.forEach((x) => {
+    payload += x.payload + "\n";
+  });
 
-  fileStream.write(joinedBuffer, (err) => {
+  fileStream.write(payload, (err) => {
     if (err) {
       console.error(`Write error: ${err.message}`);
     }
   });
 
-  fileWriteBufferArray = [];
+  fileWriteArray = [];
   clearFlushTimeout();
 };
 
@@ -120,35 +96,28 @@ const startFlush = () => {
  * Used to send response to the parent
  * @param response The response
  */
-const sendResponse = (response: Response) => {
-  parentPort?.postMessage(responseEncoder.encode(response));
+const sendResponse = (response: LogResponse) => {
+  parentPort?.postMessage(response);
 };
 
 /**
  * Handle the request decoded
- * @param request The request that was buffer bytes extracted
  */
-const requestHandler = (request: Buffer) => {
-  const requestMethod = RequestEncoder.getMethod(request);
-  const requestId = RequestEncoder.getId(request);
-  const requestLevel = RequestEncoder.getLevel(request) as LogLevelType;
-
-  switch (requestMethod) {
+const requestHandler = (request: RequestLog) => {
+  switch (request.method) {
     case METHOD.LOG: {
-      const payload = RequestEncoder.getPayloadBuffer(request);
+      fileWriteArray.push(request);
 
-      fileWriteBufferArray.push(payload);
-
-      if (fileWriteBufferArray.length >= FILE_WRITE_BUFFER_FLUSH_COUNT) {
+      if (fileWriteArray.length >= FILE_WRITE_FLUSH_COUNT) {
         flush();
       } else {
         startFlush();
       }
 
       sendResponse({
-        id: requestId,
-        level: requestLevel,
-        method: requestMethod as MethodType,
+        id: request.id,
+        level: request.level,
+        method: request.method,
         success: true,
       });
       break;
@@ -160,17 +129,17 @@ const requestHandler = (request: Buffer) => {
       if (fileStream?.writableNeedDrain) {
         fileStream.once("drain", () => {
           sendResponse({
-            id: requestId,
-            level: requestLevel,
-            method: requestMethod as MethodType,
+            id: request.id,
+            level: request.level,
+            method: request.method,
             success: true,
           });
         });
       } else {
         sendResponse({
-          id: requestId,
-          level: requestLevel,
-          method: requestMethod as MethodType,
+          id: request.id,
+          level: request.level,
+          method: request.method,
           success: true,
         });
       }
@@ -184,9 +153,9 @@ const requestHandler = (request: Buffer) => {
         createStream();
 
         sendResponse({
-          id: requestId,
-          level: requestLevel,
-          method: requestMethod as MethodType,
+          id: request.id,
+          level: request.level,
+          method: request.method,
           success: true,
         });
       });
@@ -197,9 +166,9 @@ const requestHandler = (request: Buffer) => {
 
       fileStream?.end(() => {
         sendResponse({
-          id: requestId,
-          level: requestLevel,
-          method: requestMethod as MethodType,
+          id: request.id,
+          level: request.level,
+          method: request.method,
           success: true,
         });
 
@@ -210,41 +179,16 @@ const requestHandler = (request: Buffer) => {
       return;
 
     default:
-      process.stderr.write(`request unhandled method ${requestMethod}`);
+      process.stderr.write(`request unhandled method ${request.method}`);
       sendResponse({
-        id: requestId,
-        level: requestLevel,
-        method: requestMethod as MethodType,
+        id: request.id,
+        level: request.level,
+        method: request.method,
         success: false,
       });
       break;
   }
 };
-
-/**
- * Parses the buffer and moves it along with backpressure handling
- */
-function parseBuffer() {
-  const HEADER_SIZE = RequestEncoder.getHeaderSize();
-
-  while (parentMessageBuffer.length >= HEADER_SIZE) {
-    const payloadLength = RequestEncoder.getPayloadLength(parentMessageBuffer);
-    const totalMessageSize = HEADER_SIZE + payloadLength;
-
-    if (parentMessageBuffer.length < totalMessageSize) {
-      break;
-    }
-
-    const messageBuffer = parentMessageBuffer.subarray(0, totalMessageSize);
-    requestHandler(messageBuffer);
-
-    parentMessageBuffer = parentMessageBuffer.subarray(totalMessageSize);
-  }
-
-  if (parentMessageBuffer.length >= RequestEncoder.getHeaderSize()) {
-    setImmediate(parseBuffer);
-  }
-}
 
 /**
  * Generates a log filename based on current date
@@ -287,9 +231,8 @@ async function main() {
 
   createStream();
 
-  parentPort?.on("message", (chunk: Buffer<ArrayBuffer>) => {
-    parentMessageBuffer = Buffer.concat([parentMessageBuffer, chunk]);
-    parseBuffer();
+  parentPort?.on("message", (request: RequestLog) => {
+    requestHandler(request);
   });
 }
 
