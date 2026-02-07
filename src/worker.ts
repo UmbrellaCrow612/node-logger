@@ -35,7 +35,7 @@ const FLUSH_MS = 130;
 /**
  * How many entries can accumulate before we have to flush
  */
-const BUFFER_FLUSH_COUNT = 100;
+const BUFFER_FLUSH_COUNT = 300;
 
 /**
  * Holds the timeout for flush
@@ -53,6 +53,14 @@ const clearFlushTimeout = () => {
 };
 
 /**
+ * Callback added to the write for errors
+ */
+const onWriteError = (error: Error | null | undefined) => {
+  if (error) process.stderr.write(`Write error: ${error?.message}`);
+};
+
+
+/**
  * Flushes the buffer to the file and resets it
  */
 const flush = () => {
@@ -60,9 +68,7 @@ const flush = () => {
 
   const payload = logBuffer.map((x) => x.payload).join("\n") + "\n";
 
-  fileStream.write(payload, (err) => {
-    if (err) console.error(`Write error: ${err.message}`);
-  });
+  fileStream.write(payload, onWriteError);
 
   logBuffer = [];
   clearFlushTimeout();
@@ -102,13 +108,6 @@ const requestHandler = (request: RequestLog) => {
       } else {
         startFlush();
       }
-
-      sendResponse({
-        id: request.id,
-        level: request.level,
-        method: request.method,
-        success: true,
-      });
       break;
     }
 

@@ -787,6 +787,15 @@ export class Logger {
 
     const formattedMessage = this._formatMessage(level, message, messages);
 
+    if (this._options.saveToLogFiles) {
+      this._sendToWorker({
+        id: this._getNextId(),
+        level,
+        method: METHOD.LOG,
+        payload: formattedMessage,
+      });
+    }
+
     if (this._options.outputToConsole) {
       const coloredMessage = this._colorize(level, formattedMessage);
 
@@ -795,15 +804,6 @@ export class Logger {
       } else {
         process.stdout.write(coloredMessage + "\n");
       }
-    }
-
-    if (this._options.saveToLogFiles) {
-      this._sendToWorker({
-        id: this._getNextId(),
-        level,
-        method: METHOD.LOG,
-        payload: formattedMessage,
-      });
     }
   }
 

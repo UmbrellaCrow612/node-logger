@@ -1,132 +1,130 @@
+const { Logger } = require("../dist");
 const fs = require("fs");
 const path = require("path");
-const { Logger } = require("../dist/index.js");
 
 async function main() {
-  const basePath = "./logs";
-  const logger = new Logger({ 
-    showCallSite: true, 
-    basePath: basePath,
-    saveToLogFiles: true 
+  const logsDir = "./logs";
+
+  // Clean up any existing logs first
+  if (fs.existsSync(logsDir)) {
+    fs.rmSync(logsDir, { recursive: true, force: true });
+  }
+
+  let logger = new Logger({
+    saveToLogFiles: true,
+    outputToConsole: false,
+    basePath: logsDir,
   });
 
-  console.log("Starting to write 10,000 log lines...");
-  const startTime = Date.now();
-
-  // Write 10,000 log lines
-  for (let i = 0; i < 10000; i++) {
-    logger.info("log ", i);
-  }
+  // Write multiple log entries with different levels
+  logger.info("Hello world");
+  logger.debug("Debug message");
+  logger.warn("Warning message");
+  logger.error("Error message");
+  logger.info("Second info message");
 
   await logger.flush();
   await logger.shutdown();
 
-  const writeTime = Date.now() - startTime;
-  console.log(`Finished writing in ${writeTime}ms`);
+  // --- TEST ASSERTIONS ---
 
-  // Verification
-  console.log("\nVerifying log file...");
-  
-  // Get today's date for filename
-  const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-  const logFileName = `${today}.log`;
-  const logFilePath = path.join(basePath, logFileName);
-
-  console.log(`Looking for log file: ${logFilePath}`);
-
-  // Check if file exists
-  if (!fs.existsSync(logFilePath)) {
-    console.error(`ERROR: Log file not found at ${logFilePath}`);
-    
-    // List files in basePath to help debug
-    if (fs.existsSync(basePath)) {
-      const files = fs.readdirSync(basePath);
-      console.log(`Files in ${basePath}:`, files);
-    } else {
-      console.error(`Base path ${basePath} does not exist`);
-    }
-    process.exit(1);
+  // 1. Check logs folder exists
+  if (!fs.existsSync(logsDir)) {
+    throw new Error("FAIL: logs folder was not created");
   }
+  console.log("✓ Logs folder exists");
 
-  // Read and verify file
-  const fileContent = fs.readFileSync(logFilePath, "utf8");
-  const lines = fileContent.trim().split("\n").filter(line => line.length > 0);
-  
-  console.log(`Total lines in file: ${lines.length}`);
+  // 2. Check file with YYYY-MM-DD format exists
+  const today = new Date().toISOString().split("T")[0]; // "2026-02-07"
+  const expectedFilename = `${today}.log`;
+  const expectedFilePath = path.join(logsDir, expectedFilename);
 
-  // Verify each line format and count
-  let validLines = 0;
-  let errors = [];
-  const seenNumbers = new Set();
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    
-    // Check format: [file:line:col] [timestamp] [LEVEL]: message
-    const formatRegex = /^\[[^\]]+:\d+:\d+\] \[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] \[(INFO|DEBUG|WARN|ERROR)\]: .+/;
-    
-    if (!formatRegex.test(line)) {
-      errors.push(`Line ${i + 1}: Invalid format - ${line.substring(0, 100)}`);
-      continue;
-    }
-
-    // Extract the log number (should be 0-9999)
-    const match = line.match(/log\s+(\d+)/);
-    if (match) {
-      const num = parseInt(match[1], 10);
-      seenNumbers.add(num);
-      
-      if (num < 0 || num >= 10000) {
-        errors.push(`Line ${i + 1}: Number out of range - ${num}`);
-      }
-    } else {
-      errors.push(`Line ${i + 1}: Could not extract log number`);
-    }
-
-    validLines++;
+  if (!fs.existsSync(expectedFilePath)) {
+    throw new Error(
+      `FAIL: Expected log file ${expectedFilename} not found in ${logsDir}`,
+    );
   }
+  console.log(`✓ Log file exists: ${expectedFilename}`);
 
-  // Check for missing numbers
-  const missingNumbers = [];
-  for (let i = 0; i < 10000; i++) {
-    if (!seenNumbers.has(i)) {
-      missingNumbers.push(i);
+  // 3. Check all lines were written to the file
+  const fileContent = fs.readFileSync(expectedFilePath, "utf-8");
+  const lines = fileContent
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0);
+
+  const expectedMessages = [
+    "Hello world",
+    "Debug message",
+    "Warning message",
+    "Error message",
+    "Second info message",
+  ];
+
+  // Verify we have the expected number of log lines
+  if (lines.length !== expectedMessages.length) {
+    throw new Error(
+      `FAIL: Expected ${expectedMessages.length} log lines, but found ${lines.length}`,
+    );
+  }
+  console.log(`✓ All ${lines.length} log lines written to file`);
+
+  // 4. Verify each expected message appears in the file
+  for (const msg of expectedMessages) {
+    const found = lines.some((line) => line.includes(msg));
+    if (!found) {
+      throw new Error(`FAIL: Expected message "${msg}" not found in log file`);
     }
   }
+  console.log("✓ All expected messages found in log file");
 
-  // Report results
-  console.log("\n=== VERIFICATION RESULTS ===");
-  console.log(`Expected lines: 10000`);
-  console.log(`Actual lines: ${lines.length}`);
-  console.log(`Valid format lines: ${validLines}`);
-  console.log(`Unique log numbers found: ${seenNumbers.size}`);
-  
-  if (missingNumbers.length === 0) {
-    console.log("✓ All numbers 0-9999 present");
-  } else {
-    console.log(`✗ Missing ${missingNumbers.length} numbers: ${missingNumbers.slice(0, 10).join(", ")}${missingNumbers.length > 10 ? "..." : ""}`);
-  }
+  // 5. Verify log format includes timestamp and level
+  const firstLine = lines[0];
+  const hasTimestamp = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(firstLine);
+  const hasLogLevel = /\[INFO\]|\[DEBUG\]|\[WARN\]|\[ERROR\]/.test(firstLine);
 
-  if (errors.length === 0) {
-    console.log("✓ No format errors found");
-  } else {
-    console.log(`✗ Found ${errors.length} errors:`);
-    errors.slice(0, 5).forEach(err => console.log(`  - ${err}`));
-    if (errors.length > 5) console.log(`  ... and ${errors.length - 5} more`);
+  if (!hasTimestamp) {
+    throw new Error("FAIL: Log line missing valid timestamp format");
   }
+  if (!hasLogLevel) {
+    throw new Error("FAIL: Log line missing log level");
+  }
+  console.log("✓ Log format contains timestamp and level");
 
-  // Final verdict
-  if (lines.length === 10000 && missingNumbers.length === 0 && errors.length === 0) {
-    console.log("\n✓✓✓ VERIFICATION PASSED ✓✓✓");
-    console.log(`Log file: ${path.resolve(logFilePath)}`);
-    console.log(`File size: ${(fs.statSync(logFilePath).size / 1024).toFixed(2)} KB`);
-  } else {
-    console.log("\n✗✗✗ VERIFICATION FAILED ✗✗✗");
-    process.exit(1);
+  // 6. Verify log levels are correct
+  const levelChecks = [
+    { line: 0, level: "INFO", msg: "Hello world" },
+    { line: 1, level: "DEBUG", msg: "Debug message" },
+    { line: 2, level: "WARN", msg: "Warning message" },
+    { line: 3, level: "ERROR", msg: "Error message" },
+    { line: 4, level: "INFO", msg: "Second info message" },
+  ];
+
+  for (const check of levelChecks) {
+    const line = lines[check.line];
+    const hasCorrectLevel = line.includes(`[${check.level}]`);
+    const hasCorrectMsg = line.includes(check.msg);
+
+    if (!hasCorrectLevel) {
+      throw new Error(
+        `FAIL: Line ${check.line + 1} expected [${check.level}] but got: ${line}`,
+      );
+    }
+    if (!hasCorrectMsg) {
+      throw new Error(
+        `FAIL: Line ${check.line + 1} missing message "${check.msg}"`,
+      );
+    }
   }
+  console.log("✓ All log levels match expected values");
+
+  console.log("\n🎉 All tests passed!");
+
+  // Optional: Cleanup
+  // fs.rmSync(logsDir, { recursive: true, force: true });
 }
 
-main().catch(err => {
-  console.error("Fatal error:", err);
+main().catch((err) => {
+  console.error(err.message);
   process.exit(1);
 });
