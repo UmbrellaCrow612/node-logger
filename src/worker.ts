@@ -219,9 +219,9 @@ async function main() {
   createStream();
 
   parentPort?.on("message", (requests: RequestLog[]) => {
-    requests.forEach((x) => {
-      requestHandler(x);
-    });
+    for (let i = 0, len = requests.length; i < len; i++) {
+      requestHandler(requests[i] as RequestLog);
+    }
   });
 }
 
