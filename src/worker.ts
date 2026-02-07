@@ -3,16 +3,12 @@
  */
 
 import path from "node:path";
-import {
-  METHOD,
-  LogResponse,
-  RequestLog,
-} from "./protocol";
+import { METHOD, LogResponse, RequestLog } from "./protocol";
 import fs from "node:fs";
 import { parentPort } from "worker_threads";
 
 /**
- * Used for sucess exits
+ * Used for successful exits
  */
 const EXIT_SUCCESS = 0;
 
@@ -27,9 +23,9 @@ let fileStream: fs.WriteStream | null = null;
 let basePath = "./logs";
 
 /**
- * Holds the array of buffer data we will write to the log file
+ * Holds the buffer of log entries waiting to be written
  */
-let fileWriteArray: RequestLog[] = [];
+let logBuffer: RequestLog[] = [];
 
 /**
  * How long we wait until we flush unless the buffer gets full
@@ -37,9 +33,9 @@ let fileWriteArray: RequestLog[] = [];
 const FLUSH_MS = 130;
 
 /**
- * How many buffers can accumulate before we have to flush
+ * How many entries can accumulate before we have to flush
  */
-const FILE_WRITE_FLUSH_COUNT = 100;
+const BUFFER_FLUSH_COUNT = 100;
 
 /**
  * Holds the timeout for flush
@@ -57,18 +53,18 @@ const clearFlushTimeout = () => {
 };
 
 /**
- * Flushes the buffer array to the file and resets it
+ * Flushes the buffer to the file and resets it
  */
 const flush = () => {
-  if (fileWriteArray.length === 0 || !fileStream) return;
+  if (logBuffer.length === 0 || !fileStream) return;
 
-  const payload = fileWriteArray.map(x => x.payload).join('\n') + '\n';
-  
+  const payload = logBuffer.map((x) => x.payload).join("\n") + "\n";
+
   fileStream.write(payload, (err) => {
     if (err) console.error(`Write error: ${err.message}`);
   });
 
-  fileWriteArray = [];
+  logBuffer = [];
   clearFlushTimeout();
 };
 
@@ -99,9 +95,9 @@ const sendResponse = (response: LogResponse) => {
 const requestHandler = (request: RequestLog) => {
   switch (request.method) {
     case METHOD.LOG: {
-      fileWriteArray.push(request);
+      logBuffer.push(request);
 
-      if (fileWriteArray.length >= FILE_WRITE_FLUSH_COUNT) {
+      if (logBuffer.length >= BUFFER_FLUSH_COUNT) {
         flush();
       } else {
         startFlush();
@@ -172,7 +168,7 @@ const requestHandler = (request: RequestLog) => {
       return;
 
     default:
-      process.stderr.write(`request unhandled method ${request.method}`);
+      process.stderr.write(`Unhandled request method: ${request.method}\n`);
       sendResponse({
         id: request.id,
         level: request.level,
