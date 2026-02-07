@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { LOG_LEVEL, LogLevelType, RequestLog, LogResponse, METHOD } from "./protocol";
+import {
+  LOG_LEVEL,
+  LogLevelType,
+  RequestLog,
+  LogResponse,
+  METHOD,
+} from "./protocol";
 import os from "node:os";
 import { Worker } from "node:worker_threads";
 
@@ -34,7 +40,7 @@ export type LoggerOptions = {
   saveToLogFiles: boolean;
 
   /**
-   * If this logger log's should be printed to the stdout of the process
+   * If this logger's logs should be printed to the stdout of the process
    */
   outputToConsole: boolean;
 
@@ -51,10 +57,10 @@ export type LoggerOptions = {
   /**
    * If it should add timestamps to logs
    */
-  showTimeStamps: boolean;
+  showTimestamps: boolean;
 
   /**
-   * Which timestamp format to use (only applies when showTimeStamps is true)
+   * Which timestamp format to use (only applies when showTimestamps is true)
    */
   timestampType: TimestampType;
 
@@ -70,7 +76,7 @@ export type LoggerOptions = {
   showLogLevel: boolean;
 
   /**
-   * Map a specific log level with a string value use for it
+   * Map a specific log level with a string value used for it
    */
   logLevelMap: Record<LogLevelType, string>;
 
@@ -158,7 +164,7 @@ const defaultLoggerOptions: LoggerOptions = {
     [LOG_LEVEL.DEBUG]: Colors.gray,
     [LOG_LEVEL.FATAL]: Colors.magenta,
   },
-  showTimeStamps: true,
+  showTimestamps: true,
   timestampType: "iso",
   showLogLevel: true,
   logLevelMap: {
@@ -185,22 +191,22 @@ export class LoggerInitializationError extends Error {
  */
 export class Logger {
   /**
-   * Local refrence to options passed
+   * Local reference to options passed
    */
   private _options: LoggerOptions;
 
   /**
-   * Holds the wokrer thread
+   * Holds the worker thread
    */
   private _worker: Worker | null = null;
 
   /**
-   * A requests id
+   * A request's id
    */
   private _id = 1;
 
   /**
-   * Gets the next ID if it exceeds 1 million then rolls back to zero
+   * Gets the next ID; if it exceeds 1 million then rolls back to zero
    */
   private _getNextId = () => {
     if (this._id > 1000000) {
@@ -268,12 +274,12 @@ export class Logger {
       });
 
       this._worker.stderr.on("data", (chunk) => {
-        process.stderr.write(`sidecar error ${chunk.toString()}`);
+        process.stderr.write(`Sidecar error: ${chunk.toString()}`);
       });
 
       this._worker.on("error", (err) => {
         this._clearPending();
-        process.stderr.write(`sidecar error ${this._stringify(err)}`);
+        process.stderr.write(`Sidecar error: ${this._stringify(err)}`);
       });
 
       this._worker.on("exit", () => {
@@ -282,7 +288,7 @@ export class Logger {
       });
     } catch (error) {
       process.stderr.write(
-        `Failed to spawn side car ${this._stringify(error)}`,
+        `Failed to spawn sidecar: ${this._stringify(error)}`,
       );
     }
   }
@@ -350,7 +356,7 @@ export class Logger {
           this._pending
             .get(id)
             ?.reject(
-              new Error(`Request timed out ${this._stringify(request)}`),
+              new Error(`Request timed out: ${this._stringify(request)}`),
             );
           this._pending.delete(id);
         }
@@ -716,7 +722,7 @@ export class Logger {
     }
 
     // Add timestamp if enabled
-    if (this._options.showTimeStamps) {
+    if (this._options.showTimestamps) {
       const timestamp = this._formatTimestamp(new Date());
       parts.push(`[${timestamp}]`);
     }
@@ -761,7 +767,7 @@ export class Logger {
    * Log a specific level and content
    * @param level The specific level to log
    * @param message The content of the message
-   * @param messages Any addtional messages
+   * @param messages Any additional messages
    */
   log(level: LogLevelType, message: any, ...messages: any[]): void {
     if (!this._shouldLog(level)) {
@@ -837,7 +843,7 @@ export class Logger {
   }
 
   /**
-   * Flush remaning buffer to log files
+   * Flush remaining buffer to log files
    */
   flush(): Promise<void> {
     return this._sendRequest({
