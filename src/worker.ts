@@ -53,6 +53,14 @@ const clearFlushTimeout = () => {
 };
 
 /**
+ * Callback added to the write for errors
+ */
+const onWriteError = (error: Error | null | undefined) => {
+  if (error) process.stderr.write(`Write error: ${error?.message}`);
+};
+
+
+/**
  * Flushes the buffer to the file and resets it
  */
 const flush = () => {
@@ -60,9 +68,7 @@ const flush = () => {
 
   const payload = logBuffer.map((x) => x.payload).join("\n") + "\n";
 
-  fileStream.write(payload, (err) => {
-    if (err) console.error(`Write error: ${err.message}`);
-  });
+  fileStream.write(payload, onWriteError);
 
   logBuffer = [];
   clearFlushTimeout();
