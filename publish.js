@@ -1,11 +1,24 @@
 const { execSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
 function run(cmd) {
   console.log(`\n🟦 Running: ${cmd}`);
   execSync(cmd, { stdio: "inherit" });
 }
 
+function deleteFolderIfExists(folderPath) {
+  if (fs.existsSync(folderPath)) {
+    console.log(`\n🗑️  Deleting existing ${folderPath} folder...`);
+    fs.rmSync(folderPath, { recursive: true, force: true });
+    console.log(`✅ Deleted ${folderPath}`);
+  }
+}
+
 try {
+  // Delete dist folder if it exists from previous build
+  deleteFolderIfExists("./dist");
+
   // Compile TypeScript
   run("npx tsc");
 
