@@ -60,19 +60,12 @@ const clearFlushTimeout = () => {
  * Flushes the buffer array to the file and resets it
  */
 const flush = () => {
-  if (fileWriteArray.length === 0 || !fileStream) {
-    return;
-  }
+  if (fileWriteArray.length === 0 || !fileStream) return;
 
-  let payload = "";
-  fileWriteArray.forEach((x) => {
-    payload += x.payload + "\n";
-  });
-
+  const payload = fileWriteArray.map(x => x.payload).join('\n') + '\n';
+  
   fileStream.write(payload, (err) => {
-    if (err) {
-      console.error(`Write error: ${err.message}`);
-    }
+    if (err) console.error(`Write error: ${err.message}`);
   });
 
   fileWriteArray = [];
