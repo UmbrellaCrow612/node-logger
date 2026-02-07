@@ -217,7 +217,27 @@ export class Logger {
   };
 
   /**
-   * Holds pending requests that expect a response
+   * Holds batch of LOG requests only (fire-and-forget)
+   */
+  private _logBatch: RequestLog[] = [];
+
+  /**
+   * How long it will wait until it flushes / sends the logs to the worker
+   */
+  private _logRequestFlushMs = 100;
+
+  /**
+   * Holds the timeout for log batch flushing
+   */
+  private _logBatchTimeout: NodeJS.Timeout | null = null;
+
+  /**
+   * How large we want the batch array to get before we send it
+   */
+  private _logBatchMaxSize = 250;
+
+  /**
+   * Holds pending requests that expect a response (FLUSH, RELOAD, SHUTDOWN)
    */
   private _pending: Map<
     number,
@@ -294,14 +314,50 @@ export class Logger {
   }
 
   /**
-   * Sends a message to worker thread
+   * Flush the current log batch to worker immediately
    */
-  private _sendToWorker(request: RequestLog): void {
-    if (!this._worker) {
+  private _flushLogBatch(): void {
+    if (!this._worker || this._logBatch.length === 0) {
       return;
     }
 
-    this._worker?.postMessage(request);
+    this._worker.postMessage(this._logBatch);
+    this._logBatch = [];
+    this._stopLogBatchTimer();
+  }
+
+  /**
+   * Starts the timer to flush log batch after delay
+   */
+  private _startLogBatchTimer() {
+    if (this._logBatchTimeout) return;
+
+    this._logBatchTimeout = setTimeout(() => {
+      this._flushLogBatch();
+    }, this._logRequestFlushMs);
+  }
+
+  /**
+   * Stops the log batch flush timer
+   */
+  private _stopLogBatchTimer() {
+    if (this._logBatchTimeout) {
+      clearTimeout(this._logBatchTimeout);
+      this._logBatchTimeout = null;
+    }
+  }
+
+  /**
+   * Adds a LOG request to the batch (fire-and-forget)
+   */
+  private _addToLogBatch(request: RequestLog) {
+    this._logBatch.push(request);
+
+    if (this._logBatch.length >= this._logBatchMaxSize) {
+      this._flushLogBatch();
+    } else {
+      this._startLogBatchTimer();
+    }
   }
 
   /**
@@ -316,7 +372,7 @@ export class Logger {
   }
 
   /**
-   * Handle a decoded response
+   * Handle a decoded response from worker
    */
   private _handleResponse(response: LogResponse): void {
     this._resolvePending(response);
@@ -330,26 +386,26 @@ export class Logger {
 
   /**
    * Resolve any pending requests that expected a response
-   * @param response The response
    */
   private _resolvePending(response: LogResponse) {
-    if (this._pending.has(response.id)) {
-      const obj = this._pending.get(response.id);
-      if (response.success) {
-        obj?.resolve();
-      } else {
-        obj?.reject(new Error("Request failed"));
-      }
-      this._pending.delete(response.id);
+    const pending = this._pending.get(response.id);
+    if (!pending) return;
+
+    if (response.success) {
+      pending.resolve();
+    } else {
+      pending.reject(new Error("Request failed"));
     }
+    this._pending.delete(response.id);
   }
 
   /**
-   * Send a request that expects a response to the sidecar process
-   * @param request The request to send that expects a response
+   * Send a request that expects a response (FLUSH, RELOAD, SHUTDOWN)
+   * These are sent immediately, not batched
    */
-  private _sendRequest(request: RequestLog): Promise<void> {
+  private _sendControlRequest(request: RequestLog): Promise<void> {
     const id = request.id;
+
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (this._pending.has(id)) {
@@ -373,12 +429,7 @@ export class Logger {
         },
       });
 
-      this._sendToWorker({
-        id,
-        level: request.level,
-        method: request.method,
-        payload: request.payload,
-      });
+      this._worker?.postMessage([request]);
     });
   }
 
@@ -802,7 +853,7 @@ export class Logger {
     const formattedMessage = this._formatMessage(level, message, messages);
 
     if (this._options.saveToLogFiles) {
-      this._sendToWorker({
+      this._addToLogBatch({
         id: this._getNextId(),
         level,
         method: METHOD.LOG,
@@ -860,7 +911,9 @@ export class Logger {
    * Flush remaining buffer to log files
    */
   flush(): Promise<void> {
-    return this._sendRequest({
+    this._flushLogBatch();
+
+    return this._sendControlRequest({
       id: this._getNextId(),
       level: LOG_LEVEL.INFO,
       method: METHOD.FLUSH,
@@ -872,7 +925,9 @@ export class Logger {
    * Used to reload / refresh the process
    */
   reload(): Promise<void> {
-    return this._sendRequest({
+    this._flushLogBatch();
+
+    return this._sendControlRequest({
       id: this._getNextId(),
       level: LOG_LEVEL.INFO,
       method: METHOD.RELOAD,
@@ -884,7 +939,9 @@ export class Logger {
    * Used to shut down the child process and clean up
    */
   shutdown(): Promise<void> {
-    return this._sendRequest({
+    this._flushLogBatch();
+
+    return this._sendControlRequest({
       id: this._getNextId(),
       level: LOG_LEVEL.INFO,
       method: METHOD.SHUTDOWN,
