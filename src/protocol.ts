@@ -78,9 +78,9 @@ export type LogLevelType = (typeof LOG_LEVEL)[keyof typeof LOG_LEVEL];
  */
 export type RequestLog = {
   /**
-   * Request identifier 
+   * Request identifier. Only present when method is not "LOG".
    */
-  id: number;
+  id?: number;
 
   /**
    * Operation method (e.g., LOG, FLUSH, RELOAD)
@@ -88,9 +88,9 @@ export type RequestLog = {
   method: MethodType;
 
   /**
-   * Log severity level (e.g., INFO, WARN, ERROR)
+   * Log severity level (e.g., INFO, WARN, ERROR). Only present when method is not "LOG".
    */
-  level: LogLevelType;
+  level?: LogLevelType;
 
   /**
    * Message payload.
@@ -122,4 +122,3 @@ export type LogResponse = {
    */
   success: boolean;
 };
-
