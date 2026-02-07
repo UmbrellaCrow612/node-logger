@@ -3,14 +3,12 @@ import path from "node:path";
 import {
   LOG_LEVEL,
   LogLevelType,
-  Request,
-  RequestEncoder,
-  ResponseEncoder,
-  Response,
+  RequestLog,
+  LogResponse,
   METHOD,
 } from "./protocol";
 import os from "node:os";
-import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { Worker } from "node:worker_threads";
 
 /**
  * Timestamp format options
@@ -42,7 +40,7 @@ export type LoggerOptions = {
   saveToLogFiles: boolean;
 
   /**
-   * If this logger log's should be printed to the stdout of the process
+   * If this logger's logs should be printed to the stdout of the process
    */
   outputToConsole: boolean;
 
@@ -59,10 +57,10 @@ export type LoggerOptions = {
   /**
    * If it should add timestamps to logs
    */
-  showTimeStamps: boolean;
+  showTimestamps: boolean;
 
   /**
-   * Which timestamp format to use (only applies when showTimeStamps is true)
+   * Which timestamp format to use (only applies when showTimestamps is true)
    */
   timestampType: TimestampType;
 
@@ -78,7 +76,7 @@ export type LoggerOptions = {
   showLogLevel: boolean;
 
   /**
-   * Map a specific log level with a string value use for it
+   * Map a specific log level with a string value used for it
    */
   logLevelMap: Record<LogLevelType, string>;
 
@@ -166,7 +164,7 @@ const defaultLoggerOptions: LoggerOptions = {
     [LOG_LEVEL.DEBUG]: Colors.gray,
     [LOG_LEVEL.FATAL]: Colors.magenta,
   },
-  showTimeStamps: true,
+  showTimestamps: true,
   timestampType: "iso",
   showLogLevel: true,
   logLevelMap: {
@@ -193,37 +191,22 @@ export class LoggerInitializationError extends Error {
  */
 export class Logger {
   /**
-   * Local refrence to options passed
+   * Local reference to options passed
    */
   private _options: LoggerOptions;
 
   /**
-   * Holds the spawned side car process
+   * Holds the worker thread
    */
-  private _process: ChildProcessWithoutNullStreams | null = null;
+  private _worker: Worker | null = null;
 
   /**
-   * Holds the process stdout buffer content
-   */
-  private _processStdoutBuffer: Buffer = Buffer.alloc(0);
-
-  /**
-   * Used to encode request to / from binary protocol
-   */
-  private _requestEncoder = new RequestEncoder();
-
-  /**
-   * Used to encode responses to / from binary protocol
-   */
-  private _responseEncoder = new ResponseEncoder();
-
-  /**
-   * A requests id
+   * A request's id
    */
   private _id = 1;
 
   /**
-   * Gets the next ID if it exceeds 1 million then rolls back to zero
+   * Gets the next ID; if it exceeds 1 million then rolls back to zero
    */
   private _getNextId = () => {
     if (this._id > 1000000) {
@@ -264,68 +247,61 @@ export class Logger {
 
     this._validateBasePath();
     this._initializeDirectory();
-    this._initProcess();
+    this._initWorker();
   }
 
   /**
-   * Get the path to the server / sidecar
-   * @returns Path to the server
+   * Get the path to the worker
+   * @returns Path to the worker
    */
-  private _getServerFilePath(): string {
-    return path.join(__dirname, "server.js");
+  private _getWorkerPath(): string {
+    return path.join(__dirname, "worker.js");
   }
 
   /**
-   * Inits the side car process
+   * Inits the worker thread
    */
-  private _initProcess() {
+  private _initWorker() {
     if (!this._options.saveToLogFiles) return;
 
     try {
-      const serverPath = this._getServerFilePath();
+      const workerPath = this._getWorkerPath();
 
-      this._process = spawn("node", [serverPath], {
-        env: { BASE_PATH: this.options.basePath },
+      this._worker = new Worker(workerPath);
+
+      this._worker.on("message", (response: LogResponse) => {
+        this._handleResponse(response);
       });
 
-      this._process.stdout.on("data", (chunk) => {
-        this._processStdoutBuffer = Buffer.concat([
-          this._processStdoutBuffer,
-          chunk,
-        ]);
-        this._parseProcessStdout();
+      this._worker.stderr.on("data", (chunk) => {
+        process.stderr.write(`Sidecar error: ${chunk.toString()}`);
       });
 
-      this._process.stderr.on("data", (chunk) => {
-        process.stderr.write(`sidecar error ${chunk.toString()}`);
-      });
-
-      this._process.on("error", (err) => {
+      this._worker.on("error", (err) => {
         this._clearPending();
-        process.stderr.write(`sidecar error ${this._stringify(err)}`);
+        process.stderr.write(`Sidecar error: ${this._stringify(err)}`);
       });
 
-      this._process.on("exit", () => {
+      this._worker.on("exit", () => {
         this._clearPending();
-        this._process = null;
+        this._worker = null;
       });
     } catch (error) {
       process.stderr.write(
-        `Failed to spawn side car ${this._stringify(error)}`,
+        `Failed to spawn sidecar: ${this._stringify(error)}`,
       );
     }
   }
 
   /**
-   * Writes to the stdin of the process
+   * Sends a message to worker thread
    */
-  private _writeToStdin(request: Request): void {
-    if (!this._process?.stdin?.writable) {
+  private _sendToWorker(request: RequestLog): void {
+    if (!this._worker) {
       return;
     }
 
-    const protocolReq = this._requestEncoder.encode(request);
-    this._process.stdin.write(protocolReq);
+    this._worker?.postMessage(request);
   }
 
   /**
@@ -340,45 +316,9 @@ export class Logger {
   }
 
   /**
-   * Parses the stdout buffer produced by the spawned process
-   * Uses ResponseEncoder for all protocol operations
-   */
-  private _parseProcessStdout(): void {
-    const RESPONSE_SIZE = ResponseEncoder.getHeaderSize(); // 8
-
-    while (this._processStdoutBuffer.length >= RESPONSE_SIZE) {
-      if (!ResponseEncoder.isValid(this._processStdoutBuffer)) {
-        this._processStdoutBuffer = this._processStdoutBuffer.subarray(1);
-        continue;
-      }
-
-      const responseBuffer = this._processStdoutBuffer.subarray(
-        0,
-        RESPONSE_SIZE,
-      );
-      const response = this._responseEncoder.decode(responseBuffer);
-
-      this._handleResponse(response);
-
-      this._processStdoutBuffer =
-        this._processStdoutBuffer.subarray(RESPONSE_SIZE);
-    }
-
-    // Prevent unbounded buffer growth - keep up to RESPONSE_SIZE-1 bytes of incomplete data
-    const maxBufferSize = RESPONSE_SIZE * 10; // Smaller threshold (80 bytes)
-    if (this._processStdoutBuffer.length > maxBufferSize) {
-      // This shouldn't happen with a well-behaved child, but if it does,
-      // we likely have garbage data. Keep only last 7 bytes max.
-      this._processStdoutBuffer = Buffer.from(
-        this._processStdoutBuffer.slice(-(RESPONSE_SIZE - 1)),
-      );
-    }
-  }
-
-  /**
    * Handle a decoded response
    */
-  private _handleResponse(response: Response): void {
+  private _handleResponse(response: LogResponse): void {
     this._resolvePending(response);
 
     if (!response.success) {
@@ -392,7 +332,7 @@ export class Logger {
    * Resolve any pending requests that expected a response
    * @param response The response
    */
-  private _resolvePending(response: Response) {
+  private _resolvePending(response: LogResponse) {
     if (this._pending.has(response.id)) {
       const obj = this._pending.get(response.id);
       if (response.success) {
@@ -408,7 +348,7 @@ export class Logger {
    * Send a request that expects a response to the sidecar process
    * @param request The request to send that expects a response
    */
-  private _sendRequest(request: Request): Promise<void> {
+  private _sendRequest(request: RequestLog): Promise<void> {
     const id = request.id;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -416,7 +356,7 @@ export class Logger {
           this._pending
             .get(id)
             ?.reject(
-              new Error(`Request timed out ${this._stringify(request)}`),
+              new Error(`Request timed out: ${this._stringify(request)}`),
             );
           this._pending.delete(id);
         }
@@ -433,7 +373,7 @@ export class Logger {
         },
       });
 
-      this._writeToStdin({
+      this._sendToWorker({
         id,
         level: request.level,
         method: request.method,
@@ -782,7 +722,7 @@ export class Logger {
     }
 
     // Add timestamp if enabled
-    if (this._options.showTimeStamps) {
+    if (this._options.showTimestamps) {
       const timestamp = this._formatTimestamp(new Date());
       parts.push(`[${timestamp}]`);
     }
@@ -827,7 +767,7 @@ export class Logger {
    * Log a specific level and content
    * @param level The specific level to log
    * @param message The content of the message
-   * @param messages Any addtional messages
+   * @param messages Any additional messages
    */
   log(level: LogLevelType, message: any, ...messages: any[]): void {
     if (!this._shouldLog(level)) {
@@ -858,7 +798,7 @@ export class Logger {
     }
 
     if (this._options.saveToLogFiles) {
-      this._writeToStdin({
+      this._sendToWorker({
         id: this._getNextId(),
         level,
         method: METHOD.LOG,
@@ -903,7 +843,7 @@ export class Logger {
   }
 
   /**
-   * Flush remaning buffer to log files
+   * Flush remaining buffer to log files
    */
   flush(): Promise<void> {
     return this._sendRequest({
