@@ -12,31 +12,57 @@ A lightweight logger for node js to print to console and also save them to log f
 
 
 ```ts
-let logger = new NodeLogger();
+import { Logger } from "node-logy";
 
-logger.info("Hello world", "more", 123);
-logger.warn("Hello world");
-logger.error(new Error("Yo"), "some other");
+const logger = new Logger({ saveToLogFiles: true, basePath: "./logs" });
 
-await logger.flush()
+// Multiple arguments of any type
+logger.info({ hello: "world" }, 123, "some more");
+logger.warn("Heads up!");
+logger.error(new Error("Something went wrong"));
+
+// Ensure all logs are written before exit
+await logger.flush();
+await logger.shutdown();
 ```
 
+
+console output:
 
 ```bash
-[2026-02-07T15:33:41.587Z] [INFO]: Performance test log entry number 0
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 1
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 2
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 3
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 4
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 5
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 6
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 7
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 8
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 9
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 10
-[2026-02-07T15:33:41.588Z] [INFO]: Performance test log entry number 11
+[2026-02-07T17:43:06.654Z] [INFO]: { hello: world } 123 some more
+[2026-02-07T17:43:06.656Z] [ERROR]: Error { name: Error, message: Yo, stack: Error: Yo
+    at main (C:\dev\node-logger\tests\example.js:7:16)
+    at Object.<anonymous> (C:\dev\node-logger\tests\example.js:14:1)
+    at Module._compile (node:internal/modules/cjs/loader:1730:14)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)
+    at node:internal/main/run_main_module:36:49 }
+[2026-02-07T17:43:06.656Z] [WARN]: warning
 ```
 
+log file:
+
+```txt
+[2026-02-07T17:43:06.654Z] [INFO]: { hello: world } 123 some more
+[2026-02-07T17:43:06.656Z] [ERROR]: Error { name: Error, message: Yo, stack: Error: Yo
+    at main (C:\dev\node-logger\tests\example.js:7:16)
+    at Object.<anonymous> (C:\dev\node-logger\tests\example.js:14:1)
+    at Module._compile (node:internal/modules/cjs/loader:1730:14)
+    at Object..js (node:internal/modules/cjs/loader:1895:10)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)
+    at node:internal/main/run_main_module:36:49 }
+[2026-02-07T17:43:06.656Z] [WARN]: warning
+
+```
 
 # Performance 
 
