@@ -59,7 +59,6 @@ const onWriteError = (error: Error | null | undefined) => {
   if (error) process.stderr.write(`Write error: ${error?.message}`);
 };
 
-
 /**
  * Flushes the buffer to the file and resets it
  */
@@ -219,8 +218,10 @@ async function main() {
 
   createStream();
 
-  parentPort?.on("message", (request: RequestLog) => {
-    requestHandler(request);
+  parentPort?.on("message", (requests: RequestLog[]) => {
+    requests.forEach((x) => {
+      requestHandler(x);
+    });
   });
 }
 
