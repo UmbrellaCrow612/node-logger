@@ -1,4 +1,7 @@
 import { Logger } from "../dist/index.js";
+import { performance } from "node:perf_hooks";
+import fs from "node:fs";
+import path from "node:path";
 
 async function runPerformanceTest() {
   const logger = new Logger({
@@ -50,8 +53,6 @@ async function runPerformanceTest() {
   await logger.shutdown();
 
   // Optional: Quick validation that logs were written
-  const fs = require("fs");
-  const path = require("path");
   const today = new Date().toISOString().split("T")[0];
   const logFile = path.join("./logs", `${today}.log`);
 
