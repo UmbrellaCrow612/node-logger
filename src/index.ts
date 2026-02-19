@@ -1,14 +1,18 @@
 import fs from "node:fs";
-import path from "node:path";
+import path, { dirname } from "node:path";
 import {
   LOG_LEVEL,
   LogLevelType,
   RequestLog,
   LogResponse,
   METHOD,
-} from "./protocol";
+} from "./protocol.js";
 import os from "node:os";
 import { Worker } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * Timestamp format options
@@ -286,6 +290,9 @@ export class Logger {
 
     try {
       const workerPath = this._getWorkerPath();
+      if (!fs.existsSync(workerPath)) {
+        throw new Error("Worker file not found");
+      }
 
       this._worker = new Worker(workerPath);
 
@@ -405,7 +412,7 @@ export class Logger {
    */
   private _sendControlRequest(request: RequestLog): Promise<void> {
     const id = request.id;
-    if(!id) throw new Error("Request must contain and ID")
+    if (!id) throw new Error("Request must contain and ID");
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -854,7 +861,8 @@ export class Logger {
     const formattedMessage = this._formatMessage(level, message, messages);
 
     if (this._options.saveToLogFiles) {
-      this._addToLogBatch({ // we don't need ID and level
+      this._addToLogBatch({
+        // we don't need ID and level
         method: METHOD.LOG,
         payload: formattedMessage,
       });

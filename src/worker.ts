@@ -3,7 +3,7 @@
  */
 
 import path from "node:path";
-import { METHOD, LogResponse, RequestLog } from "./protocol";
+import { METHOD, LogResponse, RequestLog } from "./protocol.js";
 import fs from "node:fs";
 import { parentPort } from "worker_threads";
 
