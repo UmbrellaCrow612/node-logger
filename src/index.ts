@@ -114,6 +114,11 @@ export type LoggerOptions = {
   showCallSite?: boolean;
 
   /**
+   * Includes additional information for the callsite
+   */
+  showDetailedCallSite?: boolean;
+
+  /**
    * Contains a list of addtional prefixes to add to each log for example `["foo"]`
    */
   additionalPrefixes?: string[];
@@ -509,10 +514,16 @@ export class Logger {
       const fileName = frame.getFileName() || "unknown";
       const lineNumber = frame.getLineNumber() || 0;
       const columnNumber = frame.getColumnNumber() || 0;
+      const functionName = frame.getFunctionName() || "anonymous";
 
-      // Get just the filename, not full path (optional - remove path.basename if you want full path)
+      if (this._options.showDetailedCallSite) {
+        const parentFrame = stack[frameIndex + 1];
+        const parentFunction = parentFrame?.getFunctionName() || "entry point";
+
+        return `${fileName}:${lineNumber}:${columnNumber} [${functionName} <- ${parentFunction}]`;
+      }
+
       const shortFileName = path.basename(fileName);
-
       return `${shortFileName}:${lineNumber}:${columnNumber}`;
     } catch {
       return "unknown";
