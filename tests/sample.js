@@ -3,12 +3,15 @@ import { Logger } from "../dist/index.js";
 async function main() {
   let logger = new Logger({
     saveToLogFiles: true,
-    showCallSite: false,
+    showCallSite: true,
     showTimestamps: false,
     showLogLevel: true,
+    callSiteOptions: {
+      fullFilePath: false
+    }
   });
 
-  logger.info("Hello world");
+  logger.log(1, "Hello world");
 
   await logger.flush();
   await logger.shutdown();

@@ -114,9 +114,14 @@ export type LoggerOptions = {
   showCallSite?: boolean;
 
   /**
-   * Includes additional information for the callsite
+   * Addtional options to change call site log information
    */
-  showDetailedCallSite?: boolean;
+  callSiteOptions?: {
+    /**
+     * If it should show a full file path or the default short name
+     */
+    fullFilePath?: boolean;
+  };
 
   /**
    * Contains a list of addtional prefixes to add to each log for example `["foo"]`
@@ -492,16 +497,32 @@ export class Logger {
       const err = new Error();
       const stack = err.stack as unknown as NodeJS.CallSite[];
 
-      // Find the first frame outside of logger.ts (skip internal calls)
-      // Stack indices: 0 = _getCallSite, 1 = _formatMessage/log, 2 = actual caller
-      let frameIndex = 2;
+      // Base index: 0 = _getCallSite, 1 = _formatMessage, 2 = log, 3 = actual caller
+      let frameIndex = 3;
 
       // Skip internal logger methods to find actual caller
-      while (
-        frameIndex < stack.length &&
-        stack[frameIndex] &&
-        stack[frameIndex]?.getFileName()?.includes(__filename)
-      ) {
+      // Use path.basename to compare just the filename, not full paths
+      // This handles path format differences between compiled and source
+      const thisFileName = path.basename(__filename);
+
+      while (frameIndex < stack.length) {
+        const frame = stack[frameIndex];
+        const frameFileName = frame?.getFileName();
+
+        // Stop if we hit a frame without a filename or outside this logger file
+        if (!frameFileName) break;
+
+        // Check if this frame is still in the logger file
+        const isLoggerFile =
+          frameFileName === __filename ||
+          path.basename(frameFileName) === thisFileName ||
+          (frameFileName.includes("node-logger") &&
+            frameFileName.includes("index.js"));
+
+        if (!isLoggerFile) {
+          break;
+        }
+
         frameIndex++;
       }
 
@@ -514,17 +535,12 @@ export class Logger {
       const fileName = frame.getFileName() || "unknown";
       const lineNumber = frame.getLineNumber() || 0;
       const columnNumber = frame.getColumnNumber() || 0;
-      const functionName = frame.getFunctionName() || "anonymous";
 
-      if (this._options.showDetailedCallSite) {
-        const parentFrame = stack[frameIndex + 1];
-        const parentFunction = parentFrame?.getFunctionName() || "entry point";
+      // Use full path or short name based on option
+      const useFullPath = this._options.callSiteOptions?.fullFilePath ?? false;
+      const displayFileName = useFullPath ? fileName : path.basename(fileName);
 
-        return `${fileName}:${lineNumber}:${columnNumber} [${functionName} <- ${parentFunction}]`;
-      }
-
-      const shortFileName = path.basename(fileName);
-      return `${shortFileName}:${lineNumber}:${columnNumber}`;
+      return `${displayFileName}:${lineNumber}:${columnNumber}`;
     } catch {
       return "unknown";
     } finally {
