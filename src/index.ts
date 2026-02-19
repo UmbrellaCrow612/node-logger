@@ -7,7 +7,6 @@ import {
   LogResponse,
   METHOD,
 } from "./protocol.js";
-import os from "node:os";
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 
@@ -110,24 +109,14 @@ export type LoggerOptions = {
   filter?: (level: LogLevelType, message: any) => boolean;
 
   /**
-   * Include process ID in logs
-   */
-  showProcessId?: boolean;
-
-  /**
-   * Include hostname in logs
-   */
-  showHostname?: boolean;
-
-  /**
-   * Include environment name (dev/prod) in logs
-   */
-  environment?: string;
-
-  /**
    * Show where it was called at (file:line:column)
    */
   showCallSite?: boolean;
+
+  /**
+   * Contains a list of addtional prefixes to add to each log for example `["foo"]`
+   */
+  additionalPrefixes?: string[];
 };
 
 /**
@@ -779,21 +768,6 @@ export class Logger {
       parts.push(`[${callSite}]`);
     }
 
-    // Add environment if enabled
-    if (this._options.environment) {
-      parts.push(`[${this._options.environment}]`);
-    }
-
-    // Add hostname if enabled
-    if (this._options.showHostname) {
-      parts.push(`[${os.hostname()}]`);
-    }
-
-    // Add process ID if enabled
-    if (this._options.showProcessId) {
-      parts.push(`[${process.pid}]`);
-    }
-
     // Add timestamp if enabled
     if (this._options.showTimestamps) {
       const timestamp = this._formatTimestamp(new Date());
@@ -804,6 +778,14 @@ export class Logger {
     if (this._options.showLogLevel) {
       const levelStr = this._getLevelString(level);
       parts.push(`[${levelStr}]`);
+    }
+
+    // Add user prefixes
+    const addPrefixes = this._options.additionalPrefixes;
+    if (addPrefixes) {
+      for (let i = 0; i < addPrefixes.length; i++) {
+        parts.push(addPrefixes[i] as string);
+      }
     }
 
     // Build the message content
