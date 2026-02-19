@@ -1,14 +1,17 @@
 import fs from "node:fs";
-import path from "node:path";
+import path, { dirname } from "node:path";
 import {
   LOG_LEVEL,
   LogLevelType,
   RequestLog,
   LogResponse,
   METHOD,
-} from "./protocol";
-import os from "node:os";
+} from "./protocol.js";
 import { Worker } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * Timestamp format options
@@ -106,24 +109,24 @@ export type LoggerOptions = {
   filter?: (level: LogLevelType, message: any) => boolean;
 
   /**
-   * Include process ID in logs
-   */
-  showProcessId?: boolean;
-
-  /**
-   * Include hostname in logs
-   */
-  showHostname?: boolean;
-
-  /**
-   * Include environment name (dev/prod) in logs
-   */
-  environment?: string;
-
-  /**
    * Show where it was called at (file:line:column)
    */
   showCallSite?: boolean;
+
+  /**
+   * Addtional options to change call site log information
+   */
+  callSiteOptions?: {
+    /**
+     * If it should show a full file path or the default short name
+     */
+    fullFilePath?: boolean;
+  };
+
+  /**
+   * Contains a list of addtional prefixes to add to each log for example `["foo"]`
+   */
+  additionalPrefixes?: string[];
 };
 
 /**
@@ -286,6 +289,9 @@ export class Logger {
 
     try {
       const workerPath = this._getWorkerPath();
+      if (!fs.existsSync(workerPath)) {
+        throw new Error("Worker file not found");
+      }
 
       this._worker = new Worker(workerPath);
 
@@ -405,7 +411,7 @@ export class Logger {
    */
   private _sendControlRequest(request: RequestLog): Promise<void> {
     const id = request.id;
-    if(!id) throw new Error("Request must contain and ID")
+    if (!id) throw new Error("Request must contain and ID");
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -491,16 +497,32 @@ export class Logger {
       const err = new Error();
       const stack = err.stack as unknown as NodeJS.CallSite[];
 
-      // Find the first frame outside of logger.ts (skip internal calls)
-      // Stack indices: 0 = _getCallSite, 1 = _formatMessage/log, 2 = actual caller
-      let frameIndex = 2;
+      // Base index: 0 = _getCallSite, 1 = _formatMessage, 2 = log, 3 = actual caller
+      let frameIndex = 3;
 
       // Skip internal logger methods to find actual caller
-      while (
-        frameIndex < stack.length &&
-        stack[frameIndex] &&
-        stack[frameIndex]?.getFileName()?.includes(__filename)
-      ) {
+      // Use path.basename to compare just the filename, not full paths
+      // This handles path format differences between compiled and source
+      const thisFileName = path.basename(__filename);
+
+      while (frameIndex < stack.length) {
+        const frame = stack[frameIndex];
+        const frameFileName = frame?.getFileName();
+
+        // Stop if we hit a frame without a filename or outside this logger file
+        if (!frameFileName) break;
+
+        // Check if this frame is still in the logger file
+        const isLoggerFile =
+          frameFileName === __filename ||
+          path.basename(frameFileName) === thisFileName ||
+          (frameFileName.includes("node-logger") &&
+            frameFileName.includes("index.js"));
+
+        if (!isLoggerFile) {
+          break;
+        }
+
         frameIndex++;
       }
 
@@ -514,10 +536,11 @@ export class Logger {
       const lineNumber = frame.getLineNumber() || 0;
       const columnNumber = frame.getColumnNumber() || 0;
 
-      // Get just the filename, not full path (optional - remove path.basename if you want full path)
-      const shortFileName = path.basename(fileName);
+      // Use full path or short name based on option
+      const useFullPath = this._options.callSiteOptions?.fullFilePath ?? false;
+      const displayFileName = useFullPath ? fileName : path.basename(fileName);
 
-      return `${shortFileName}:${lineNumber}:${columnNumber}`;
+      return `${displayFileName}:${lineNumber}:${columnNumber}`;
     } catch {
       return "unknown";
     } finally {
@@ -772,21 +795,6 @@ export class Logger {
       parts.push(`[${callSite}]`);
     }
 
-    // Add environment if enabled
-    if (this._options.environment) {
-      parts.push(`[${this._options.environment}]`);
-    }
-
-    // Add hostname if enabled
-    if (this._options.showHostname) {
-      parts.push(`[${os.hostname()}]`);
-    }
-
-    // Add process ID if enabled
-    if (this._options.showProcessId) {
-      parts.push(`[${process.pid}]`);
-    }
-
     // Add timestamp if enabled
     if (this._options.showTimestamps) {
       const timestamp = this._formatTimestamp(new Date());
@@ -797,6 +805,14 @@ export class Logger {
     if (this._options.showLogLevel) {
       const levelStr = this._getLevelString(level);
       parts.push(`[${levelStr}]`);
+    }
+
+    // Add user prefixes
+    const addPrefixes = this._options.additionalPrefixes;
+    if (addPrefixes) {
+      for (let i = 0; i < addPrefixes.length; i++) {
+        parts.push(addPrefixes[i] as string);
+      }
     }
 
     // Build the message content
@@ -854,7 +870,8 @@ export class Logger {
     const formattedMessage = this._formatMessage(level, message, messages);
 
     if (this._options.saveToLogFiles) {
-      this._addToLogBatch({ // we don't need ID and level
+      this._addToLogBatch({
+        // we don't need ID and level
         method: METHOD.LOG,
         payload: formattedMessage,
       });

@@ -1,10 +1,13 @@
-const { Logger } = require("../dist/index.js");
+import { Logger } from "../dist/index.js";
+import { performance } from "node:perf_hooks";
+import fs from "node:fs";
+import path from "node:path";
 
 async function runPerformanceTest() {
-  const logger = new Logger({ 
+  const logger = new Logger({
     basePath: "./logs",
     saveToLogFiles: true,
-    outputToConsole: false
+    outputToConsole: false,
   });
 
   console.log("=== Performance Test: 10,000 Log Lines ===\n");
@@ -20,7 +23,7 @@ async function runPerformanceTest() {
 
   const fireForgetTime = performance.now() - startTime;
   console.timeEnd("Total time (fire-and-forget)");
-  
+
   // Test 2: Time to flush (ensure all writes complete)
   console.time("Flush time");
   const flushStart = performance.now();
@@ -30,13 +33,13 @@ async function runPerformanceTest() {
 
   // Test 3: Total end-to-end time
   const totalTime = performance.now() - startTime;
-  
+
   // Memory usage
   const endMemory = process.memoryUsage();
   const memoryUsed = (endMemory.heapUsed - startMemory.heapUsed) / 1024 / 1024;
 
   // Throughput calculations
-  const logsPerSecond = (10000 / totalTime * 1000).toFixed(0);
+  const logsPerSecond = ((10000 / totalTime) * 1000).toFixed(0);
   const avgTimePerLog = (totalTime / 10000).toFixed(3);
 
   console.log("\n=== Results ===");
@@ -50,14 +53,14 @@ async function runPerformanceTest() {
   await logger.shutdown();
 
   // Optional: Quick validation that logs were written
-  const fs = require("fs");
-  const path = require("path");
   const today = new Date().toISOString().split("T")[0];
   const logFile = path.join("./logs", `${today}.log`);
-  
+
   if (fs.existsSync(logFile)) {
     const stats = fs.statSync(logFile);
-    console.log(`Log file size:             ${(stats.size / 1024).toFixed(2)} KB`);
+    console.log(
+      `Log file size:             ${(stats.size / 1024).toFixed(2)} KB`,
+    );
   }
 
   console.log("\n=== Test Complete ===");
