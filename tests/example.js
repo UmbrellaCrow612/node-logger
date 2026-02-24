@@ -1,7 +1,7 @@
-const { Logger } = require("../dist");
+import { Logger } from "../dist/index.js";
 
 async function main() {
-  let logger = new Logger({ saveToLogFiles: true, basePath: "./logs" });
+  let logger = new Logger({ saveToLogFiles: false, basePath: "./logs" });
 
   logger.info({ hello: "world" }, 123, "some more");
   logger.error(new Error("Yo"));
