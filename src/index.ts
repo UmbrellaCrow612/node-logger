@@ -927,6 +927,9 @@ export class Logger {
    * Flush remaining buffer to log files
    */
   flush(): Promise<void> {
+    if (!this._options.saveToLogFiles) {
+      return Promise.resolve();
+    }
     this._flushLogBatch();
 
     return this._sendControlRequest({
@@ -941,6 +944,9 @@ export class Logger {
    * Used to reload / refresh the process
    */
   reload(): Promise<void> {
+    if (!this._options.saveToLogFiles) {
+      return Promise.resolve();
+    }
     this._flushLogBatch();
 
     return this._sendControlRequest({
@@ -955,6 +961,9 @@ export class Logger {
    * Used to shut down the child process and clean up
    */
   shutdown(): Promise<void> {
+    if (!this._options.saveToLogFiles) {
+      return Promise.resolve();
+    }
     this._flushLogBatch();
 
     return this._sendControlRequest({
