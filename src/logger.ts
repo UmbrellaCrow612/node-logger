@@ -474,47 +474,47 @@ export class Logger {
       const err = new Error();
       const stack = err.stack as unknown as NodeJS.CallSite[];
 
-      // Get the custom frame index offset from options (default: 0 means use auto-detection)
       const customFrameIndex = this._options.callSiteOptions?.frameIndex;
+      const thisFileName = path.basename(__filename);
 
       let frameIndex: number;
 
       if (customFrameIndex !== undefined && customFrameIndex >= 0) {
-        // User provided a custom frame index - use it directly
-        // Add 3 to account for: _getCallSite, _formatMessage, log method
-        frameIndex = customFrameIndex + 3;
+        // User wants specific control:
+        // 0 = who called info/warn/etc (skip _getCallSite, _formatMessage, log, info/warn/etc)
+        // Need to skip 4 frames: _getCallSite, _formatMessage, log, wrapper (info/warn/etc)
+        frameIndex = customFrameIndex + 4;
       } else {
-        // Auto-detect: skip internal logger methods to find actual caller
-        // Base index: 0 = _getCallSite, 1 = _formatMessage, 2 = log, 3 = actual caller
-        frameIndex = 3;
-
-        const thisFileName = path.basename(__filename);
+        // Auto-detect: skip all logger internals
+        frameIndex = 1; // Start after _getCallSite itself
 
         while (frameIndex < stack.length) {
           const frame = stack[frameIndex];
           const frameFileName = frame?.getFileName();
 
-          if (!frameFileName) break;
+          if (!frameFileName) {
+            frameIndex++;
+            continue;
+          }
 
           const isLoggerFile =
             frameFileName === __filename ||
-            path.basename(frameFileName) === thisFileName ||
-            (frameFileName.includes("node-logger") &&
-              frameFileName.includes("index.js"));
+            path.basename(frameFileName) === thisFileName;
 
           if (!isLoggerFile) {
             break;
           }
-
           frameIndex++;
         }
       }
 
-      const frame = stack[frameIndex];
-
-      if (!frame) {
+      // Safety check
+      if (frameIndex >= stack.length) {
         return "unknown";
       }
+
+      const frame = stack[frameIndex];
+      if (!frame) return "unknown";
 
       const fileName = frame.getFileName() || "unknown";
       const lineNumber = frame.getLineNumber() || 0;
@@ -763,7 +763,7 @@ export class Logger {
    * @param message The content of the message
    * @param messages Any additional messages
    */
-  log(level: LogLevelType, message: any, ...messages: any[]): void {
+  private log(level: LogLevelType, message: any, ...messages: any[]): void {
     const formattedMessage = this._formatMessage(level, message, messages);
 
     if (this._options.saveToLogFiles) {

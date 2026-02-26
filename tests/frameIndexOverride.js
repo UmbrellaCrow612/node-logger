@@ -17,11 +17,12 @@ const main = async () => {
   let logger = new Logger({
     saveToLogFiles: true,
     showCallSite: true,
-    callSiteOptions: {  frameIndex: 2, fullFilePath: true },
+    callSiteOptions: {frameIndex: 1 },
+    showTimestamps: false,
   });
 
   frameIndexLogWrapperCaller(logger);
-  localFrameIndexLogWrapper(logger)
+  localFrameIndexLogWrapper(logger);
 
   await logger.flush();
   await logger.shutdown();
