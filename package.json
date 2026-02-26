@@ -5,7 +5,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
-  "scripts": {},
+  "scripts": {
+    "build": "shx rm -rf ./dist && npx tsc"
+  },
   "keywords": [
     "node",
     "nodejs",
@@ -37,6 +39,7 @@
   "devDependencies": {
     "@types/node": "^25.0.10",
     "pino": "^10.3.0",
+    "shx": "^0.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
