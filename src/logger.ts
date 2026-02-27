@@ -246,7 +246,6 @@ export class Logger {
     };
 
     this._validateBasePath();
-    this._initializeDirectory();
     this._initWorker();
   }
 
@@ -270,7 +269,12 @@ export class Logger {
         throw new Error("Worker file not found");
       }
 
-      this._worker = new Worker(workerPath);
+      this._worker = new Worker(workerPath, {
+        env: {
+          BASE_PATH: this._options.basePath,
+          SHOULD_SAVE_FILE: `${this._options.saveToLogFiles}`,
+        },
+      });
 
       this._worker.on("message", (response: LogResponse) => {
         this._handleResponse(response);
@@ -443,27 +447,6 @@ export class Logger {
   }
 
   /**
-   * Creates the log directory if file logging is enabled
-   */
-  private _initializeDirectory(): void {
-    if (!this._options.saveToLogFiles) {
-      return;
-    }
-
-    try {
-      fs.mkdirSync(this._options.basePath, { recursive: true });
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-
-      throw new LoggerInitializationError(
-        `Failed to create log directory at "${this._options.basePath}": ${nodeError.message}`,
-      );
-    }
-
-    this._verifyWritable();
-  }
-
-  /**
    * Extract call site information (file:line:column) from stack trace
    */
   private _getCallSite(): string {
@@ -528,23 +511,6 @@ export class Logger {
       return "unknown";
     } finally {
       Error.prepareStackTrace = originalPrepareStackTrace;
-    }
-  }
-
-  /**
-   * Verifies the log directory is writable
-   */
-  private _verifyWritable(): void {
-    try {
-      const testFile = path.join(this._options.basePath, ".write-test");
-      fs.writeFileSync(testFile, "", { flag: "wx" });
-      fs.unlinkSync(testFile);
-    } catch (error) {
-      const nodeError = error as NodeJS.ErrnoException;
-
-      throw new LoggerInitializationError(
-        `Log directory "${this._options.basePath}" is not writable: ${nodeError.message}`,
-      );
     }
   }
 

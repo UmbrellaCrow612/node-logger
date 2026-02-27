@@ -15,7 +15,7 @@ function localFrameIndexLogWrapper(log) {
 
 const main = async () => {
   let logger = new Logger({
-    saveToLogFiles: true,
+    saveToLogFiles: false,
     showCallSite: true,
     callSiteOptions: {frameIndex: 1 },
     showTimestamps: false,

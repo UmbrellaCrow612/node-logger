@@ -208,20 +208,33 @@ const createStream = () => {
 };
 
 /**
- * Main entry point
+ * Main entry point - NOW LAZY, runs only when first message received
  */
-async function main() {
-  basePath = process.env["BASE_PATH"] ? process.env["BASE_PATH"] : "./logs";
-  basePath = path.normalize(path.resolve(basePath));
+function main() {
+  parentPort?.once("message", async (initRequests: RequestLog[]) => {
+    const basePathEnv = process.env["BASE_PATH"] ?? "./logs";
+    basePath = path.normalize(basePathEnv);
 
-  await fs.promises.mkdir(basePath, { recursive: true });
-
-  createStream();
-
-  parentPort?.on("message", (requests: RequestLog[]) => {
-    for (let i = 0, len = requests.length; i < len; i++) {
-      requestHandler(requests[i] as RequestLog);
+    const shouldSaveToFile = process.env["SHOULD_SAVE_FILE"];
+    if (!(shouldSaveToFile === "true")) {
+      // for some reason if we get here we will terminate the file should have never been spawned
+      process.exit();
     }
+
+    await fs.promises.mkdir(basePath, { recursive: true });
+    createStream();
+
+    // Handle the first batch of requests
+    for (let i = 0, len = initRequests.length; i < len; i++) {
+      requestHandler(initRequests[i] as RequestLog);
+    }
+
+    // Setup ongoing message handler
+    parentPort?.on("message", (requests: RequestLog[]) => {
+      for (let i = 0, len = requests.length; i < len; i++) {
+        requestHandler(requests[i] as RequestLog);
+      }
+    });
   });
 }
 
